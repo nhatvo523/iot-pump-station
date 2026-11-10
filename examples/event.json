@@ -1,0 +1,10 @@
+{
+  "ts": "2026-11-10T08:01:00.000Z",
+  "station": "PS01",
+  "code": "HIGH_LEVEL",
+  "severity": "warning",
+  "active": true,
+  "tag": "LT01",
+  "value": 85.3,
+  "threshold": 85
+}

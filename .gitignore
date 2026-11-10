@@ -2,3 +2,7 @@ flows_cred.json
 node_modules/
 .config*.json
 .npm/
+
+# Local checkpoint/technical reports are excluded from project commits.
+Bao_cao_*.docx
+/reports/
