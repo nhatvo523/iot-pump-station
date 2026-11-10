@@ -1,0 +1,4 @@
+flows_cred.json
+node_modules/
+.config*.json
+.npm/
