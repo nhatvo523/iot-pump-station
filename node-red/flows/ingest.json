@@ -70,7 +70,7 @@
     "type": "function",
     "z": "tab_ing",
     "name": "Normalize telemetry",
-    "func": "// Normalize one simulator telemetry message into ONE multi-table INSERT for TDengine.\n// asset/unit/role come from the registry below, never copied blindly from the payload,\n// and every string put into SQL is whitelisted (no SQL injection from MQTT payloads).\nconst DB = 'iot_ps';\nconst REG = {\n  tags:  { LT01: { asset: 'T01', unit: '%' }, PT01: { asset: 'OUT01', unit: 'bar' }, FT01: { asset: 'OUT01', unit: 'm3/h' } },\n  pumps: { P01: 'main', P02: 'standby' }\n};\nconst STATE_CODE = { Stopped: 0, Running: 1, Fault: 2 };\nconst SCENARIOS = ['normal', 'low_level', 'high_pressure', 'pump_fault'];\nconst ALARMS = ['LOW_LEVEL', 'LOW_LOW_LEVEL', 'HIGH_LEVEL', 'HIGH_HIGH_LEVEL', 'HIGH_PRESSURE', 'PUMP_FAULT'];\nconst has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);\n\nconst stats = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, lastError: null };\nfunction reject(reason) {\n  stats.rejected++; stats.lastError = 'rejected: ' + reason;\n  flow.set('ingest_stats', stats);\n  node.warn('Telemetry rejected: ' + reason);\n  node.status({ fill: 'yellow', shape: 'ring', text: 'rejected: ' + reason });\n  return null;\n}\n\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return reject('payload is not a JSON object');\nif (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$/.test(String(p.ts))) return reject('bad ts format');\nconst ts = Date.parse(p.ts);\nif (!isFinite(ts)) return reject('bad ts value');\nif (typeof p.station !== 'string' || !/^[A-Z0-9]{1,16}$/.test(p.station)) return reject('bad station');\nif (!SCENARIOS.includes(p.scenario)) return reject('bad scenario');\nif (!Array.isArray(p.alarms) || !p.alarms.every(a => ALARMS.includes(a))) return reject('bad alarms');\n\nconst st = p.station, stl = st.toLowerCase();\nconst parts = [];\n\nfor (const tag of Object.keys(REG.tags)) {\n  const r = REG.tags[tag], t = p.tags && p.tags[tag];\n  if (!t || typeof t.value !== 'number' || !isFinite(t.value)) return reject('missing/invalid tag ' + tag);\n  if (t.asset !== r.asset || t.unit !== r.unit) return reject('asset/unit mismatch on ' + tag);\n  if (t.quality !== 'good' && t.quality !== 'bad') return reject('bad quality on ' + tag);\n  parts.push(`${DB}.${stl}_${tag.toLowerCase()} USING ${DB}.telemetry TAGS ('${st}','${r.asset}','${tag}','${r.unit}') VALUES (${ts}, ${t.value.toFixed(3)}, '${t.quality}')`);\n}\n\nfor (const pump of Object.keys(REG.pumps)) {\n  const role = REG.pumps[pump], x = p.pumps && p.pumps[pump];\n  if (!x || typeof x.status !== 'string' || !has(STATE_CODE, x.status)) return reject('bad status on ' + pump);\n  if (x.role !== role) return reject('role mismatch on ' + pump);\n  parts.push(`${DB}.${stl}_${pump.toLowerCase()}_status USING ${DB}.pump_status TAGS ('${st}','${pump}','${role}') VALUES (${ts}, '${x.status}', ${STATE_CODE[x.status]})`);\n}\n\nparts.push(`${DB}.${stl}_state USING ${DB}.station_state TAGS ('${st}') VALUES (${ts}, '${p.scenario}', '${p.alarms.join(',')}')`);\n\nmsg.kind = 'telemetry';\nmsg.sql = 'INSERT INTO ' + parts.join(' ');\nmsg.payload = msg.sql;\nmsg.headers = { 'Content-Type': 'text/plain', 'Authorization': 'Basic cm9vdDp0YW9zZGF0YQ==' };\nreturn msg;\n",
+    "func": "// Normalize one simulator telemetry message into ONE multi-table INSERT for TDengine.\n// asset/unit/role come from the registry below, never copied blindly from the payload,\n// and every string put into SQL is whitelisted (no SQL injection from MQTT payloads).\nconst DB = 'iot_ps';\nconst REG = {\n  tags:  { LT01: { asset: 'T01', unit: '%' }, PT01: { asset: 'OUT01', unit: 'bar' }, FT01: { asset: 'OUT01', unit: 'm3/h' } },\n  pumps: { P01: 'main', P02: 'standby' }\n};\nconst STATE_CODE = { Stopped: 0, Running: 1, Fault: 2 };\nconst SCENARIOS = ['normal', 'low_level', 'high_pressure', 'pump_fault'];\nconst ALARMS = ['LOW_LEVEL', 'LOW_LOW_LEVEL', 'HIGH_LEVEL', 'HIGH_HIGH_LEVEL', 'HIGH_PRESSURE', 'PUMP_FAULT'];\nconst has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);\n\nconst stats = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, skipped: 0, lastError: null };\nif (flow.get('schema_ready') !== true) {\n  stats.skipped = (stats.skipped || 0) + 1;\n  flow.set('ingest_stats', stats);\n  node.status({ fill: 'yellow', shape: 'ring', text: 'waiting for schema | skipped ' + stats.skipped });\n  return null;\n}\nfunction reject(reason) {\n  stats.rejected++; stats.lastError = 'rejected: ' + reason;\n  flow.set('ingest_stats', stats);\n  node.warn('Telemetry rejected: ' + reason);\n  node.status({ fill: 'yellow', shape: 'ring', text: 'rejected: ' + reason });\n  return null;\n}\n\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return reject('payload is not a JSON object');\nif (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$/.test(String(p.ts))) return reject('bad ts format');\nconst ts = Date.parse(p.ts);\nif (!isFinite(ts)) return reject('bad ts value');\nif (typeof p.station !== 'string' || !/^[A-Z0-9]{1,16}$/.test(p.station)) return reject('bad station');\nif (!SCENARIOS.includes(p.scenario)) return reject('bad scenario');\nif (!Array.isArray(p.alarms) || !p.alarms.every(a => ALARMS.includes(a))) return reject('bad alarms');\n\nconst st = p.station, stl = st.toLowerCase();\nconst parts = [];\n\nfor (const tag of Object.keys(REG.tags)) {\n  const r = REG.tags[tag], t = p.tags && p.tags[tag];\n  if (!t || typeof t.value !== 'number' || !isFinite(t.value)) return reject('missing/invalid tag ' + tag);\n  if (t.asset !== r.asset || t.unit !== r.unit) return reject('asset/unit mismatch on ' + tag);\n  if (t.quality !== 'good' && t.quality !== 'bad') return reject('bad quality on ' + tag);\n  parts.push(`${DB}.${stl}_${tag.toLowerCase()} USING ${DB}.telemetry TAGS ('${st}','${r.asset}','${tag}','${r.unit}') VALUES (${ts}, ${t.value.toFixed(3)}, '${t.quality}')`);\n}\n\nfor (const pump of Object.keys(REG.pumps)) {\n  const role = REG.pumps[pump], x = p.pumps && p.pumps[pump];\n  if (!x || typeof x.status !== 'string' || !has(STATE_CODE, x.status)) return reject('bad status on ' + pump);\n  if (x.role !== role) return reject('role mismatch on ' + pump);\n  parts.push(`${DB}.${stl}_${pump.toLowerCase()}_status USING ${DB}.pump_status TAGS ('${st}','${pump}','${role}') VALUES (${ts}, '${x.status}', ${STATE_CODE[x.status]})`);\n}\n\nparts.push(`${DB}.${stl}_state USING ${DB}.station_state TAGS ('${st}') VALUES (${ts}, '${p.scenario}', '${p.alarms.join(',')}')`);\n\nmsg.kind = 'telemetry';\nmsg.sql = 'INSERT INTO ' + parts.join(' ');\nmsg.payload = msg.sql;\nmsg.headers = { 'Content-Type': 'text/plain', 'Authorization': 'Basic cm9vdDp0YW9zZGF0YQ==' };\nreturn msg;\n",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -81,7 +81,8 @@
     "y": 90,
     "wires": [
       [
-        "http_td"
+        "http_td",
+        "dbg_sql_tele"
       ]
     ]
   },
@@ -121,7 +122,7 @@
     "type": "function",
     "z": "tab_ing",
     "name": "Normalize event",
-    "func": "// Normalize one alarm event (published only on state change) into a TDengine INSERT.\n// One child table per (station, alarm code): events of different alarms in the same\n// tick have the same ts and would overwrite each other in a shared table.\nconst DB = 'iot_ps';\nconst ALARMS = ['LOW_LEVEL', 'LOW_LOW_LEVEL', 'HIGH_LEVEL', 'HIGH_HIGH_LEVEL', 'HIGH_PRESSURE', 'PUMP_FAULT'];\nconst SEVERITIES = ['warning', 'critical'];\nconst TAGS = ['LT01', 'PT01', 'FT01'];\n\nconst stats = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, lastError: null };\nfunction reject(reason) {\n  stats.rejected++; stats.lastError = 'rejected event: ' + reason;\n  flow.set('ingest_stats', stats);\n  node.warn('Event rejected: ' + reason);\n  node.status({ fill: 'yellow', shape: 'ring', text: 'rejected: ' + reason });\n  return null;\n}\n\nconst e = msg.payload;\nif (!e || typeof e !== 'object') return reject('payload is not a JSON object');\nif (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$/.test(String(e.ts))) return reject('bad ts format');\nconst ts = Date.parse(e.ts);\nif (!isFinite(ts)) return reject('bad ts value');\nif (typeof e.station !== 'string' || !/^[A-Z0-9]{1,16}$/.test(e.station)) return reject('bad station');\nif (!ALARMS.includes(e.code)) return reject('bad code');\nif (!SEVERITIES.includes(e.severity)) return reject('bad severity');\nif (typeof e.active !== 'boolean') return reject('bad active flag');\n\nconst tagId = (e.tag === undefined) ? 'NULL' : (TAGS.includes(e.tag) ? `'${e.tag}'` : null);\nif (tagId === null) return reject('bad tag');\nconst numOrNull = v => (v === undefined) ? 'NULL' : (typeof v === 'number' && isFinite(v) ? v.toFixed(3) : null);\nconst val = numOrNull(e.value), thr = numOrNull(e.threshold);\nif (val === null || thr === null) return reject('bad value/threshold');\n\nconst table = `${DB}.${e.station.toLowerCase()}_alm_${e.code.toLowerCase()}`;\nmsg.kind = 'event';\nmsg.sql = `INSERT INTO ${table} USING ${DB}.alarm_events TAGS ('${e.station}','${e.code}') VALUES (${ts}, '${e.severity}', ${e.active}, ${tagId}, ${val}, ${thr})`;\nmsg.payload = msg.sql;\nmsg.headers = { 'Content-Type': 'text/plain', 'Authorization': 'Basic cm9vdDp0YW9zZGF0YQ==' };\nreturn msg;\n",
+    "func": "// Normalize one alarm event (published only on state change) into a TDengine INSERT.\n// One child table per (station, alarm code): events of different alarms in the same\n// tick have the same ts and would overwrite each other in a shared table.\nconst DB = 'iot_ps';\nconst ALARMS = ['LOW_LEVEL', 'LOW_LOW_LEVEL', 'HIGH_LEVEL', 'HIGH_HIGH_LEVEL', 'HIGH_PRESSURE', 'PUMP_FAULT'];\nconst SEVERITIES = ['warning', 'critical'];\nconst TAGS = ['LT01', 'PT01', 'FT01'];\n\nconst stats = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, skipped: 0, lastError: null };\nif (flow.get('schema_ready') !== true) {\n  stats.skipped = (stats.skipped || 0) + 1;\n  flow.set('ingest_stats', stats);\n  node.status({ fill: 'yellow', shape: 'ring', text: 'waiting for schema | skipped ' + stats.skipped });\n  return null;\n}\nfunction reject(reason) {\n  stats.rejected++; stats.lastError = 'rejected event: ' + reason;\n  flow.set('ingest_stats', stats);\n  node.warn('Event rejected: ' + reason);\n  node.status({ fill: 'yellow', shape: 'ring', text: 'rejected: ' + reason });\n  return null;\n}\n\nconst e = msg.payload;\nif (!e || typeof e !== 'object') return reject('payload is not a JSON object');\nif (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$/.test(String(e.ts))) return reject('bad ts format');\nconst ts = Date.parse(e.ts);\nif (!isFinite(ts)) return reject('bad ts value');\nif (typeof e.station !== 'string' || !/^[A-Z0-9]{1,16}$/.test(e.station)) return reject('bad station');\nif (!ALARMS.includes(e.code)) return reject('bad code');\nif (!SEVERITIES.includes(e.severity)) return reject('bad severity');\nif (typeof e.active !== 'boolean') return reject('bad active flag');\n\nconst tagId = (e.tag === undefined) ? 'NULL' : (TAGS.includes(e.tag) ? `'${e.tag}'` : null);\nif (tagId === null) return reject('bad tag');\nconst numOrNull = v => (v === undefined) ? 'NULL' : (typeof v === 'number' && isFinite(v) ? v.toFixed(3) : null);\nconst val = numOrNull(e.value), thr = numOrNull(e.threshold);\nif (val === null || thr === null) return reject('bad value/threshold');\n\nconst table = `${DB}.${e.station.toLowerCase()}_alm_${e.code.toLowerCase()}`;\nmsg.kind = 'event';\nmsg.sql = `INSERT INTO ${table} USING ${DB}.alarm_events TAGS ('${e.station}','${e.code}') VALUES (${ts}, '${e.severity}', ${e.active}, ${tagId}, ${val}, ${thr})`;\nmsg.payload = msg.sql;\nmsg.headers = { 'Content-Type': 'text/plain', 'Authorization': 'Basic cm9vdDp0YW9zZGF0YQ==' };\nreturn msg;\n",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -132,7 +133,8 @@
     "y": 200,
     "wires": [
       [
-        "http_td"
+        "http_td",
+        "dbg_sql_evt"
       ]
     ]
   },
@@ -140,7 +142,7 @@
     "id": "c_c",
     "type": "comment",
     "z": "tab_ing",
-    "name": "3) Schema setup (idempotent, auto-runs 5 s after deploy; click to re-run)",
+    "name": "3) Ordered schema setup + retry + verification (auto-run after 5 s)",
     "info": "",
     "x": 270,
     "y": 270,
@@ -176,18 +178,24 @@
     "type": "function",
     "z": "tab_ing",
     "name": "Setup schema",
-    "func": "// Send the (idempotent) DDL statements one by one; a delay node (1 msg/s) keeps the order.\nconst DB = 'iot_ps';\nconst ddl = [\n  `CREATE DATABASE IF NOT EXISTS ${DB} PRECISION 'ms'`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.telemetry (ts TIMESTAMP, val DOUBLE, qual VARCHAR(8)) TAGS (station VARCHAR(16), asset VARCHAR(16), tag_id VARCHAR(16), eng_unit VARCHAR(8))`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.pump_status (ts TIMESTAMP, pump_state VARCHAR(12), state_code TINYINT) TAGS (station VARCHAR(16), asset VARCHAR(16), pump_role VARCHAR(12))`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.alarm_events (ts TIMESTAMP, severity VARCHAR(12), is_active BOOL, tag_id VARCHAR(16), val DOUBLE, thr DOUBLE) TAGS (station VARCHAR(16), alarm_code VARCHAR(24))`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.station_state (ts TIMESTAMP, scenario VARCHAR(16), active_alarms VARCHAR(80)) TAGS (station VARCHAR(16))`\n];\nddl.forEach(sql => node.send({\n  kind: 'ddl', sql, payload: sql,\n  headers: { 'Content-Type': 'text/plain', 'Authorization': 'Basic cm9vdDp0YW9zZGF0YQ==' }\n}));\nnode.status({ text: ddl.length + ' DDL statements queued' });\nreturn null;\n",
-    "outputs": 1,
+    "func": "// One in-flight statement. Advance only after its REST response succeeds.\nconst DB = 'iot_ps';\nconst expected = ['telemetry', 'pump_status', 'alarm_events', 'station_state'];\nconst ddl = [\n  `CREATE DATABASE IF NOT EXISTS ${DB} PRECISION 'ms'`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.telemetry (ts TIMESTAMP, val DOUBLE, qual VARCHAR(8)) TAGS (station VARCHAR(16), asset VARCHAR(16), tag_id VARCHAR(16), eng_unit VARCHAR(8))`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.pump_status (ts TIMESTAMP, pump_state VARCHAR(12), state_code TINYINT) TAGS (station VARCHAR(16), asset VARCHAR(16), pump_role VARCHAR(12))`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.alarm_events (ts TIMESTAMP, severity VARCHAR(12), is_active BOOL, tag_id VARCHAR(16), val DOUBLE, thr DOUBLE) TAGS (station VARCHAR(16), alarm_code VARCHAR(24))`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.station_state (ts TIMESTAMP, scenario VARCHAR(16), active_alarms VARCHAR(80)) TAGS (station VARCHAR(16))`,\n  `SHOW ${DB}.stables`\n];\nlet state = flow.get('schema_setup');\nif (msg.kind === 'schema_response') {\n  if (!state || state.done || !state.waiting || msg.setupRun !== state.run ||\n      msg.setupIndex !== state.index || msg.setupAttempt !== state.attempt) return null;\n  state.waiting = false;\n  const result = msg.schemaResult;\n  let ok = result.ok;\n  let reason = result.reason;\n  // IF NOT EXISTS normally returns code 0. Accept only an explicit already-exists response.\n  if (!ok && state.index < 5 && /^(?:database|stable|super table|table) already exists$/i.test(String(result.body && result.body.desc))) ok = true;\n  if (ok && state.index === 5) {\n    const names = ((result.body && result.body.data) || []).map(row => row[0]);\n    ok = names.length === expected.length && expected.every(name => names.includes(name));\n    if (!ok) reason = 'expected exactly 4 stables, got: ' + names.join(',');\n  }\n  if (!ok) {\n    if (state.attempt >= 10) {\n      state.done = true;\n      flow.set('schema_setup', state);\n      flow.set('schema_ready', false);\n      node.status({ fill: 'red', shape: 'ring', text: 'schema failed at step ' + (state.index + 1) });\n      return [null, null, { payload: { reason: 'Schema setup failed after 10 attempts: ' + reason, kind: 'schema', sql: ddl[state.index] } }];\n    }\n    flow.set('schema_setup', state);\n    const delay = Math.min(5000, 1000 + state.attempt * 1000);\n    node.status({ fill: 'yellow', shape: 'ring', text: 'retry step ' + (state.index + 1) + ' in ' + delay / 1000 + 's' });\n    return [null, { kind: 'schema_retry', setupRun: state.run, setupIndex: state.index, setupAttempt: state.attempt, delay }, null];\n  }\n  state.index++;\n  state.attempt = 0;\n  if (state.index === ddl.length) {\n    state.done = true;\n    flow.set('schema_setup', state);\n    flow.set('schema_ready', true);\n    node.status({ fill: 'green', shape: 'dot', text: 'schema ready (4/4)' });\n    return null;\n  }\n} else if (msg.kind === 'schema_retry') {\n  if (!state || state.done || state.waiting || msg.setupRun !== state.run ||\n      msg.setupIndex !== state.index || msg.setupAttempt !== state.attempt) return null;\n} else {\n  if (state && !state.done) return null; // Ignore repeated clicks during an active setup.\n  const run = (flow.get('schema_run') || 0) + 1;\n  flow.set('schema_run', run);\n  state = { run, index: 0, attempt: 0, waiting: false, done: false };\n  flow.set('schema_ready', false);\n}\nstate.attempt++;\nstate.waiting = true;\nflow.set('schema_setup', state);\nnode.status({ fill: 'blue', shape: 'dot', text: 'schema step ' + (state.index + 1) + '/6 | attempt ' + state.attempt });\nconst sql = ddl[state.index];\nreturn [{ kind: 'schema', setupRun: state.run, setupIndex: state.index, setupAttempt: state.attempt,\n  sql, payload: sql,\n  headers: { 'Content-Type': 'text/plain', 'Authorization': 'Basic cm9vdDp0YW9zZGF0YQ==' }\n}, null, null];\n",
+    "outputs": 3,
     "timeout": 0,
     "noerr": 0,
-    "initialize": "",
+    "initialize": "flow.set('schema_ready', false);\nflow.set('schema_setup', null);\n",
     "finalize": "",
     "libs": [],
     "x": 330,
     "y": 320,
     "wires": [
       [
+        "http_td"
+      ],
+      [
         "dly"
+      ],
+      [
+        "dbg_err"
       ]
     ]
   },
@@ -195,9 +203,9 @@
     "id": "dly",
     "type": "delay",
     "z": "tab_ing",
-    "name": "1 msg/s (keep order)",
-    "pauseType": "rate",
-    "timeout": "5",
+    "name": "schema retry backoff (msg.delay)",
+    "pauseType": "delay",
+    "timeout": "2",
     "timeoutUnits": "seconds",
     "rate": "1",
     "nbRateUnits": "1",
@@ -212,7 +220,7 @@
     "y": 320,
     "wires": [
       [
-        "http_td"
+        "f_setup"
       ]
     ]
   },
@@ -238,7 +246,8 @@
       [
         "f_chk"
       ]
-    ]
+    ],
+    "requestTimeout": "15000"
   },
   {
     "id": "catch_td",
@@ -262,8 +271,8 @@
     "type": "function",
     "z": "tab_ing",
     "name": "Check response",
-    "func": "// TDengine returns HTTP 200 even for SQL errors; success means body.code === 0.\n// Network errors arrive here through a Catch node (msg.error is set).\nconst stats = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, lastError: null };\nlet ok = false, why = '';\n\nif (msg.error) {\n  why = 'connection error: ' + (msg.error.message || msg.error.code || JSON.stringify(msg.error));\n} else if (msg.statusCode !== 200) {\n  why = 'HTTP ' + msg.statusCode + ' ' + String(msg.payload).slice(0, 200);\n} else {\n  let body = null;\n  try { body = (typeof msg.payload === 'string') ? JSON.parse(msg.payload) : msg.payload; } catch (e) { body = null; }\n  if (!body) why = 'unparseable response';\n  else if (body.code !== 0) why = 'TDengine code ' + body.code + ': ' + body.desc;\n  else ok = true;\n}\n\nif (ok) {\n  stats.ok++; stats.lastOkAt = new Date().toISOString();\n  flow.set('ingest_stats', stats);\n  node.status({ fill: 'green', shape: 'dot', text: `ok ${stats.ok} | fail ${stats.fail} | rejected ${stats.rejected}` });\n  return null;                         // success is silent\n}\nstats.fail++; stats.lastError = why;\nflow.set('ingest_stats', stats);\nnode.status({ fill: 'red', shape: 'ring', text: `ok ${stats.ok} | fail ${stats.fail}: ${why.slice(0, 40)}` });\nreturn { payload: { reason: why, kind: msg.kind, sql: String(msg.sql || '').slice(0, 300) } };\n",
-    "outputs": 1,
+    "func": "// TDengine returns HTTP 200 even for SQL errors; success means body.code === 0.\n// Network errors arrive here through a Catch node (msg.error is set).\nconst stats = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, skipped: 0, lastError: null };\nlet ok = false, why = '', body = null;\n\nif (msg.error) {\n  why = 'connection error: ' + (msg.error.message || msg.error.code || JSON.stringify(msg.error));\n} else if (msg.statusCode !== 200) {\n  why = 'HTTP ' + msg.statusCode + ' ' + String(msg.payload).slice(0, 200);\n} else {\n  try { body = (typeof msg.payload === 'string') ? JSON.parse(msg.payload) : msg.payload; } catch (e) { body = null; }\n  if (!body) why = 'unparseable response';\n  else if (body.code !== 0) why = 'TDengine code ' + body.code + ': ' + body.desc;\n  else ok = true;\n}\n\nif (msg.kind === 'schema') {\n  const state = flow.get('schema_setup');\n  if (!state || state.done || !state.waiting || msg.setupRun !== state.run ||\n      msg.setupIndex !== state.index || msg.setupAttempt !== state.attempt) return null;\n  const names = ((body && body.data) || []).map(row => row[0]);\n  const verified = msg.setupIndex === 5 && ok && names.length === 4 &&\n    ['telemetry', 'pump_status', 'alarm_events', 'station_state'].every(name => names.includes(name));\n  node.status({ fill: verified ? 'green' : (ok ? 'blue' : 'yellow'), shape: 'dot',\n    text: verified ? 'schema ready (4/4)' : ((!ok || msg.setupIndex === 5) && msg.setupAttempt >= 10) ? 'schema failed after 10 attempts' : 'schema step ' + (msg.setupIndex + 1) + '/6 | ' + (ok ? 'ok' : 'retry/failure') });\n  return [null, { kind: 'schema_response', setupRun: msg.setupRun, setupIndex: msg.setupIndex,\n    setupAttempt: msg.setupAttempt, schemaResult: { ok, reason: why, body } }];\n}\nif (ok) {\n  stats.ok++; stats.lastOkAt = new Date().toISOString();\n  flow.set('ingest_stats', stats);\n  node.status({ fill: 'green', shape: 'dot', text: `ok ${stats.ok} | fail ${stats.fail} | rejected ${stats.rejected} | skipped ${stats.skipped || 0}` });\n  return null;                         // success is silent\n}\nstats.fail++; stats.lastError = why;\nflow.set('ingest_stats', stats);\nnode.status({ fill: 'red', shape: 'ring', text: `ok ${stats.ok} | fail ${stats.fail}: ${why.slice(0, 40)}` });\nreturn [{ payload: { reason: why, kind: msg.kind, sql: String(msg.sql || '').slice(0, 300) } }, null];\n",
+    "outputs": 2,
     "timeout": 0,
     "noerr": 0,
     "initialize": "",
@@ -274,6 +283,9 @@
     "wires": [
       [
         "dbg_err"
+      ],
+      [
+        "f_setup"
       ]
     ]
   },
@@ -296,7 +308,7 @@
     "id": "c_d",
     "type": "comment",
     "z": "tab_ing",
-    "name": "4) Counters (ok / fail / rejected)",
+    "name": "4) Counters (ok / fail / rejected / skipped)",
     "info": "",
     "x": 160,
     "y": 400,
@@ -332,7 +344,7 @@
     "type": "function",
     "z": "tab_ing",
     "name": "Read stats",
-    "func": "msg.payload = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, lastError: null };\nreturn msg;\n",
+    "func": "msg.payload = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, skipped: 0, lastError: null };\nmsg.payload = { skipped: 0, ...msg.payload };\nreturn msg;\n",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -360,6 +372,36 @@
     "targetType": "msg",
     "x": 500,
     "y": 450,
+    "wires": []
+  },
+  {
+    "id": "dbg_sql_tele",
+    "type": "debug",
+    "z": "tab_ing",
+    "name": "SQL telemetry ? TDengine",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 1050,
+    "y": 90,
+    "wires": []
+  },
+  {
+    "id": "dbg_sql_evt",
+    "type": "debug",
+    "z": "tab_ing",
+    "name": "SQL event ? TDengine",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 1050,
+    "y": 150,
     "wires": []
   }
 ]

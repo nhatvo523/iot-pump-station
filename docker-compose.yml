@@ -32,6 +32,7 @@ services:
       - TZ=Asia/Ho_Chi_Minh
     ports:
       - "6041:6041"
+      - "6060:6060"
     volumes:
       - tdengine-data:/var/lib/taos
       - tdengine-log:/var/log/taos
