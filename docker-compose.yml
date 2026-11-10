@@ -20,8 +20,25 @@ services:
       - nodered-data:/data
     depends_on:
       - mosquitto
+      - tdengine
+    restart: unless-stopped
+
+  tdengine:
+    image: tdengine/tsdb:latest        # after it runs OK, pin the exact version
+    container_name: tdengine
+    hostname: tdengine
+    environment:
+      - TAOS_FQDN=tdengine
+      - TZ=Asia/Ho_Chi_Minh
+    ports:
+      - "6041:6041"
+    volumes:
+      - tdengine-data:/var/lib/taos
+      - tdengine-log:/var/log/taos
     restart: unless-stopped
 
 volumes:
   mosquitto-data:
   nodered-data:
+  tdengine-data:
+  tdengine-log:

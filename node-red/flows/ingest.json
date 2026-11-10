@@ -1,0 +1,365 @@
+[
+  {
+    "id": "tab_ing",
+    "type": "tab",
+    "label": "Ingest PS01",
+    "disabled": false,
+    "info": "MQTT -> normalize -> TDengine (REST). Reads plant/ps01/telemetry and plant/ps01/events."
+  },
+  {
+    "id": "broker_ing",
+    "type": "mqtt-broker",
+    "name": "Mosquitto (ingest)",
+    "broker": "mosquitto",
+    "port": "1883",
+    "clientid": "nodered-ingest",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": false,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "c_a",
+    "type": "comment",
+    "z": "tab_ing",
+    "name": "1) Telemetry -> 3 sensor rows + 2 pump rows + state row (one INSERT)",
+    "info": "",
+    "x": 260,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "in_tele",
+    "type": "mqtt in",
+    "z": "tab_ing",
+    "name": "telemetry",
+    "topic": "plant/ps01/telemetry",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "broker_ing",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 130,
+    "y": 90,
+    "wires": [
+      [
+        "f_tele"
+      ]
+    ]
+  },
+  {
+    "id": "f_tele",
+    "type": "function",
+    "z": "tab_ing",
+    "name": "Normalize telemetry",
+    "func": "// Normalize one simulator telemetry message into ONE multi-table INSERT for TDengine.\n// asset/unit/role come from the registry below, never copied blindly from the payload,\n// and every string put into SQL is whitelisted (no SQL injection from MQTT payloads).\nconst DB = 'iot_ps';\nconst REG = {\n  tags:  { LT01: { asset: 'T01', unit: '%' }, PT01: { asset: 'OUT01', unit: 'bar' }, FT01: { asset: 'OUT01', unit: 'm3/h' } },\n  pumps: { P01: 'main', P02: 'standby' }\n};\nconst STATE_CODE = { Stopped: 0, Running: 1, Fault: 2 };\nconst SCENARIOS = ['normal', 'low_level', 'high_pressure', 'pump_fault'];\nconst ALARMS = ['LOW_LEVEL', 'LOW_LOW_LEVEL', 'HIGH_LEVEL', 'HIGH_HIGH_LEVEL', 'HIGH_PRESSURE', 'PUMP_FAULT'];\nconst has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);\n\nconst stats = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, lastError: null };\nfunction reject(reason) {\n  stats.rejected++; stats.lastError = 'rejected: ' + reason;\n  flow.set('ingest_stats', stats);\n  node.warn('Telemetry rejected: ' + reason);\n  node.status({ fill: 'yellow', shape: 'ring', text: 'rejected: ' + reason });\n  return null;\n}\n\nconst p = msg.payload;\nif (!p || typeof p !== 'object') return reject('payload is not a JSON object');\nif (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$/.test(String(p.ts))) return reject('bad ts format');\nconst ts = Date.parse(p.ts);\nif (!isFinite(ts)) return reject('bad ts value');\nif (typeof p.station !== 'string' || !/^[A-Z0-9]{1,16}$/.test(p.station)) return reject('bad station');\nif (!SCENARIOS.includes(p.scenario)) return reject('bad scenario');\nif (!Array.isArray(p.alarms) || !p.alarms.every(a => ALARMS.includes(a))) return reject('bad alarms');\n\nconst st = p.station, stl = st.toLowerCase();\nconst parts = [];\n\nfor (const tag of Object.keys(REG.tags)) {\n  const r = REG.tags[tag], t = p.tags && p.tags[tag];\n  if (!t || typeof t.value !== 'number' || !isFinite(t.value)) return reject('missing/invalid tag ' + tag);\n  if (t.asset !== r.asset || t.unit !== r.unit) return reject('asset/unit mismatch on ' + tag);\n  if (t.quality !== 'good' && t.quality !== 'bad') return reject('bad quality on ' + tag);\n  parts.push(`${DB}.${stl}_${tag.toLowerCase()} USING ${DB}.telemetry TAGS ('${st}','${r.asset}','${tag}','${r.unit}') VALUES (${ts}, ${t.value.toFixed(3)}, '${t.quality}')`);\n}\n\nfor (const pump of Object.keys(REG.pumps)) {\n  const role = REG.pumps[pump], x = p.pumps && p.pumps[pump];\n  if (!x || typeof x.status !== 'string' || !has(STATE_CODE, x.status)) return reject('bad status on ' + pump);\n  if (x.role !== role) return reject('role mismatch on ' + pump);\n  parts.push(`${DB}.${stl}_${pump.toLowerCase()}_status USING ${DB}.pump_status TAGS ('${st}','${pump}','${role}') VALUES (${ts}, '${x.status}', ${STATE_CODE[x.status]})`);\n}\n\nparts.push(`${DB}.${stl}_state USING ${DB}.station_state TAGS ('${st}') VALUES (${ts}, '${p.scenario}', '${p.alarms.join(',')}')`);\n\nmsg.kind = 'telemetry';\nmsg.sql = 'INSERT INTO ' + parts.join(' ');\nmsg.payload = msg.sql;\nmsg.headers = { 'Content-Type': 'text/plain', 'Authorization': 'Basic cm9vdDp0YW9zZGF0YQ==' };\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 90,
+    "wires": [
+      [
+        "http_td"
+      ]
+    ]
+  },
+  {
+    "id": "c_b",
+    "type": "comment",
+    "z": "tab_ing",
+    "name": "2) Alarm events -> alarm_events",
+    "info": "",
+    "x": 150,
+    "y": 150,
+    "wires": []
+  },
+  {
+    "id": "in_evt",
+    "type": "mqtt in",
+    "z": "tab_ing",
+    "name": "events",
+    "topic": "plant/ps01/events",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "broker_ing",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 120,
+    "y": 200,
+    "wires": [
+      [
+        "f_evt"
+      ]
+    ]
+  },
+  {
+    "id": "f_evt",
+    "type": "function",
+    "z": "tab_ing",
+    "name": "Normalize event",
+    "func": "// Normalize one alarm event (published only on state change) into a TDengine INSERT.\n// One child table per (station, alarm code): events of different alarms in the same\n// tick have the same ts and would overwrite each other in a shared table.\nconst DB = 'iot_ps';\nconst ALARMS = ['LOW_LEVEL', 'LOW_LOW_LEVEL', 'HIGH_LEVEL', 'HIGH_HIGH_LEVEL', 'HIGH_PRESSURE', 'PUMP_FAULT'];\nconst SEVERITIES = ['warning', 'critical'];\nconst TAGS = ['LT01', 'PT01', 'FT01'];\n\nconst stats = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, lastError: null };\nfunction reject(reason) {\n  stats.rejected++; stats.lastError = 'rejected event: ' + reason;\n  flow.set('ingest_stats', stats);\n  node.warn('Event rejected: ' + reason);\n  node.status({ fill: 'yellow', shape: 'ring', text: 'rejected: ' + reason });\n  return null;\n}\n\nconst e = msg.payload;\nif (!e || typeof e !== 'object') return reject('payload is not a JSON object');\nif (!/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,3})?Z$/.test(String(e.ts))) return reject('bad ts format');\nconst ts = Date.parse(e.ts);\nif (!isFinite(ts)) return reject('bad ts value');\nif (typeof e.station !== 'string' || !/^[A-Z0-9]{1,16}$/.test(e.station)) return reject('bad station');\nif (!ALARMS.includes(e.code)) return reject('bad code');\nif (!SEVERITIES.includes(e.severity)) return reject('bad severity');\nif (typeof e.active !== 'boolean') return reject('bad active flag');\n\nconst tagId = (e.tag === undefined) ? 'NULL' : (TAGS.includes(e.tag) ? `'${e.tag}'` : null);\nif (tagId === null) return reject('bad tag');\nconst numOrNull = v => (v === undefined) ? 'NULL' : (typeof v === 'number' && isFinite(v) ? v.toFixed(3) : null);\nconst val = numOrNull(e.value), thr = numOrNull(e.threshold);\nif (val === null || thr === null) return reject('bad value/threshold');\n\nconst table = `${DB}.${e.station.toLowerCase()}_alm_${e.code.toLowerCase()}`;\nmsg.kind = 'event';\nmsg.sql = `INSERT INTO ${table} USING ${DB}.alarm_events TAGS ('${e.station}','${e.code}') VALUES (${ts}, '${e.severity}', ${e.active}, ${tagId}, ${val}, ${thr})`;\nmsg.payload = msg.sql;\nmsg.headers = { 'Content-Type': 'text/plain', 'Authorization': 'Basic cm9vdDp0YW9zZGF0YQ==' };\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 200,
+    "wires": [
+      [
+        "http_td"
+      ]
+    ]
+  },
+  {
+    "id": "c_c",
+    "type": "comment",
+    "z": "tab_ing",
+    "name": "3) Schema setup (idempotent, auto-runs 5 s after deploy; click to re-run)",
+    "info": "",
+    "x": 270,
+    "y": 270,
+    "wires": []
+  },
+  {
+    "id": "inj_setup",
+    "type": "inject",
+    "z": "tab_ing",
+    "name": "create schema",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 5,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 130,
+    "y": 320,
+    "wires": [
+      [
+        "f_setup"
+      ]
+    ]
+  },
+  {
+    "id": "f_setup",
+    "type": "function",
+    "z": "tab_ing",
+    "name": "Setup schema",
+    "func": "// Send the (idempotent) DDL statements one by one; a delay node (1 msg/s) keeps the order.\nconst DB = 'iot_ps';\nconst ddl = [\n  `CREATE DATABASE IF NOT EXISTS ${DB} PRECISION 'ms'`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.telemetry (ts TIMESTAMP, val DOUBLE, qual VARCHAR(8)) TAGS (station VARCHAR(16), asset VARCHAR(16), tag_id VARCHAR(16), eng_unit VARCHAR(8))`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.pump_status (ts TIMESTAMP, pump_state VARCHAR(12), state_code TINYINT) TAGS (station VARCHAR(16), asset VARCHAR(16), pump_role VARCHAR(12))`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.alarm_events (ts TIMESTAMP, severity VARCHAR(12), is_active BOOL, tag_id VARCHAR(16), val DOUBLE, thr DOUBLE) TAGS (station VARCHAR(16), alarm_code VARCHAR(24))`,\n  `CREATE STABLE IF NOT EXISTS ${DB}.station_state (ts TIMESTAMP, scenario VARCHAR(16), active_alarms VARCHAR(80)) TAGS (station VARCHAR(16))`\n];\nddl.forEach(sql => node.send({\n  kind: 'ddl', sql, payload: sql,\n  headers: { 'Content-Type': 'text/plain', 'Authorization': 'Basic cm9vdDp0YW9zZGF0YQ==' }\n}));\nnode.status({ text: ddl.length + ' DDL statements queued' });\nreturn null;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 330,
+    "y": 320,
+    "wires": [
+      [
+        "dly"
+      ]
+    ]
+  },
+  {
+    "id": "dly",
+    "type": "delay",
+    "z": "tab_ing",
+    "name": "1 msg/s (keep order)",
+    "pauseType": "rate",
+    "timeout": "5",
+    "timeoutUnits": "seconds",
+    "rate": "1",
+    "nbRateUnits": "1",
+    "rateUnits": "second",
+    "randomFirst": "1",
+    "randomLast": "5",
+    "randomUnits": "seconds",
+    "drop": false,
+    "allowrate": false,
+    "outputs": 1,
+    "x": 560,
+    "y": 320,
+    "wires": [
+      [
+        "http_td"
+      ]
+    ]
+  },
+  {
+    "id": "http_td",
+    "type": "http request",
+    "z": "tab_ing",
+    "name": "TDengine REST /rest/sql",
+    "method": "POST",
+    "ret": "txt",
+    "paytoqs": "ignore",
+    "url": "http://tdengine:6041/rest/sql",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 800,
+    "y": 200,
+    "wires": [
+      [
+        "f_chk"
+      ]
+    ]
+  },
+  {
+    "id": "catch_td",
+    "type": "catch",
+    "z": "tab_ing",
+    "name": "network errors",
+    "scope": [
+      "http_td"
+    ],
+    "uncaught": false,
+    "x": 800,
+    "y": 260,
+    "wires": [
+      [
+        "f_chk"
+      ]
+    ]
+  },
+  {
+    "id": "f_chk",
+    "type": "function",
+    "z": "tab_ing",
+    "name": "Check response",
+    "func": "// TDengine returns HTTP 200 even for SQL errors; success means body.code === 0.\n// Network errors arrive here through a Catch node (msg.error is set).\nconst stats = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, lastError: null };\nlet ok = false, why = '';\n\nif (msg.error) {\n  why = 'connection error: ' + (msg.error.message || msg.error.code || JSON.stringify(msg.error));\n} else if (msg.statusCode !== 200) {\n  why = 'HTTP ' + msg.statusCode + ' ' + String(msg.payload).slice(0, 200);\n} else {\n  let body = null;\n  try { body = (typeof msg.payload === 'string') ? JSON.parse(msg.payload) : msg.payload; } catch (e) { body = null; }\n  if (!body) why = 'unparseable response';\n  else if (body.code !== 0) why = 'TDengine code ' + body.code + ': ' + body.desc;\n  else ok = true;\n}\n\nif (ok) {\n  stats.ok++; stats.lastOkAt = new Date().toISOString();\n  flow.set('ingest_stats', stats);\n  node.status({ fill: 'green', shape: 'dot', text: `ok ${stats.ok} | fail ${stats.fail} | rejected ${stats.rejected}` });\n  return null;                         // success is silent\n}\nstats.fail++; stats.lastError = why;\nflow.set('ingest_stats', stats);\nnode.status({ fill: 'red', shape: 'ring', text: `ok ${stats.ok} | fail ${stats.fail}: ${why.slice(0, 40)}` });\nreturn { payload: { reason: why, kind: msg.kind, sql: String(msg.sql || '').slice(0, 300) } };\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1040,
+    "y": 220,
+    "wires": [
+      [
+        "dbg_err"
+      ]
+    ]
+  },
+  {
+    "id": "dbg_err",
+    "type": "debug",
+    "z": "tab_ing",
+    "name": "TDengine errors",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 1250,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "c_d",
+    "type": "comment",
+    "z": "tab_ing",
+    "name": "4) Counters (ok / fail / rejected)",
+    "info": "",
+    "x": 160,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "inj_stats",
+    "type": "inject",
+    "z": "tab_ing",
+    "name": "show stats",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 120,
+    "y": 450,
+    "wires": [
+      [
+        "f_stats"
+      ]
+    ]
+  },
+  {
+    "id": "f_stats",
+    "type": "function",
+    "z": "tab_ing",
+    "name": "Read stats",
+    "func": "msg.payload = flow.get('ingest_stats') || { ok: 0, fail: 0, rejected: 0, lastError: null };\nreturn msg;\n",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 320,
+    "y": 450,
+    "wires": [
+      [
+        "dbg_stats"
+      ]
+    ]
+  },
+  {
+    "id": "dbg_stats",
+    "type": "debug",
+    "z": "tab_ing",
+    "name": "stats",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 500,
+    "y": 450,
+    "wires": []
+  }
+]
