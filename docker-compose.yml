@@ -38,8 +38,25 @@ services:
       - tdengine-log:/var/log/taos
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:latest
+    container_name: iot-pump-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_PLUGINS_PREINSTALL_SYNC=tdengine-datasource@4.0.2@https://github.com/taosdata/grafanaplugin/releases/download/v4.0.2/tdengine-datasource-4.0.2.zip
+      - TDENGINE_BASIC_AUTH=${TDENGINE_BASIC_AUTH:-cm9vdDp0YW9zZGF0YQ==}
+    volumes:
+      - grafana-project-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    restart: unless-stopped
+
 volumes:
   mosquitto-data:
   nodered-data:
   tdengine-data:
   tdengine-log:
+  grafana-project-data:

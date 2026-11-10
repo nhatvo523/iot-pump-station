@@ -1,0 +1,16 @@
+apiVersion: 1
+datasources:
+  - name: TDengine PS01
+    uid: tdengine-ps01
+    type: tdengine-datasource
+    access: proxy
+    orgId: 1
+    url: http://tdengine:6041
+    isDefault: true
+    editable: false
+    jsonData:
+      isLoadAlerts: false
+    secureJsonData:
+      url: http://tdengine:6041
+      basicAuth: $TDENGINE_BASIC_AUTH
+    version: 1
