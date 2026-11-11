@@ -83,6 +83,72 @@ function Check-GrafanaData([DateTimeOffset]$MinimumTimestamp, [string]$Label) {
     Record $Label 'PASS' @{ datasource = $health.status; sampleUtc = $timestamp.ToString('o'); value = $frames[0].data.values[1][0] }
 }
 
+function Check-DeployedFlows {
+    # Compare code hashes without printing source, broker settings, or credentials.
+    $code = "const fs=require('fs'),c=require('crypto');const f=JSON.parse(fs.readFileSync('/data/flows.json','utf8'));console.log(JSON.stringify(f.filter(n=>n.type==='function').map(n=>({id:n.id,sha256:c.createHash('sha256').update(n.func).digest('hex')}))))"
+    $raw = Invoke-Compose @('exec', '-T', 'nodered', 'node', '-e', $code)
+    $deployed = ($raw -join "`n") | ConvertFrom-Json
+    $mismatches = @()
+    $compared = 0
+    foreach ($file in @('node-red/flows/simulator.json', 'node-red/flows/ingest.json')) {
+        $nodes = Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($node in @($nodes | Where-Object type -eq 'function')) {
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            try {
+                $hash = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($node.func))).Replace('-', '').ToLowerInvariant()
+            } finally { $sha.Dispose() }
+            $live = @($deployed | Where-Object id -eq $node.id)
+            if ($live.Count -ne 1 -or $live[0].sha256 -ne $hash) { $mismatches += $node.id }
+            $compared++
+        }
+    }
+    if ($mismatches.Count) {
+        Record 'Deployed function code matches repository' 'FAIL' @{ compared = $compared; mismatches = $mismatches; action = 'Review/import the intended flow version before claiming live scenario verification.' }
+    } else {
+        Record 'Deployed function code matches repository' 'PASS' @{ compared = $compared }
+    }
+}
+
+function Check-GrafanaDashboardAndRules {
+    if ([string]::IsNullOrWhiteSpace($GrafanaToken)) {
+        Record 'Grafana dashboard and six alarm rules' 'SKIP' 'Set GRAFANA_API_TOKEN.'
+        return
+    }
+    $dashboard = (Invoke-Grafana '/api/dashboards/uid/ps01-monitoring').dashboard
+    $dataPanels = @($dashboard.panels | Where-Object { $_.targets.Count -gt 0 -and $_.type -ne 'alertlist' })
+    $now = [DateTimeOffset]::UtcNow
+    $targetsChecked = 0
+    foreach ($panel in $dataPanels) {
+        $response = Invoke-Grafana '/api/ds/query' @{
+            from = [string]$now.AddMinutes(-30).ToUnixTimeMilliseconds()
+            to = [string]$now.ToUnixTimeMilliseconds()
+            queries = @($panel.targets)
+        }
+        foreach ($target in $panel.targets) {
+            $result = $response.results.($target.refId)
+            Assert-Check ($null -ne $result -and -not $result.error) ("Panel query failed: " + $panel.title)
+            Assert-Check (@($result.frames).Count -gt 0) ("No query frames: " + $panel.title)
+            $targetsChecked++
+        }
+    }
+    Record 'All Grafana data panels' 'PASS' @{ panels = $dataPanels.Count; targets = $targetsChecked; note = 'Query/frames checked; historical event table can legitimately have no rows in the selected range.' }
+    $expected = (Get-Content 'grafana/provisioning/alerting/ps01-alerts.json' -Raw -Encoding UTF8 | ConvertFrom-Json).groups.rules
+    $live = (Invoke-Grafana '/api/prometheus/grafana/api/v1/rules').data.groups.rules
+    foreach ($rule in $expected) {
+        $actual = @($live | Where-Object uid -eq $rule.uid)
+        Assert-Check ($actual.Count -eq 1) ("Missing or duplicate alert rule: " + $rule.uid)
+        Assert-Check ($actual[0].health -eq 'ok' -and -not $actual[0].isPaused) ("Unhealthy/paused rule: " + $rule.uid)
+        Assert-Check ($actual[0].lastEvaluation -notlike '0001*') ("Rule has not evaluated: " + $rule.uid)
+        $queries = $actual[0].query | ConvertFrom-Json
+        $queryA = @($queries | Where-Object refId -eq 'A')[0]
+        Assert-Check ($queryA.model.sql -eq $rule.data[0].model.sql) ("Rule SQL differs from repository: " + $rule.uid)
+        Assert-Check (@($dashboard.panels | Where-Object id -eq ([int]$rule.annotations.__panelId__)).Count -eq 1) ("Broken alert panel link: " + $rule.uid)
+    }
+    $panel = @($dashboard.panels | Where-Object type -eq 'alertlist')[0]
+    Assert-Check ($null -ne $panel -and -not $panel.options.stateFilter.normal -and -not $panel.options.showInactiveAlerts) 'Alert list should hide normal/inactive rules.'
+    Record 'Grafana six alarm rules and active-only alert list' 'PASS' @($live | Where-Object { $_.uid -in $expected.uid } | Select-Object uid, state, health, lastEvaluation)
+}
+
 Push-Location $projectRoot
 try {
     $null = Invoke-Compose @('config', '--quiet')
@@ -91,6 +157,7 @@ try {
         Assert-Check ($running -contains $service) "Service not running: $service"
     }
     Record 'Compose services' 'PASS' ($running -join ', ')
+    Check-DeployedFlows
 
     $raw = Invoke-Compose @('exec', '-T', 'mosquitto', 'mosquitto_sub', '-t', 'plant/ps01/telemetry', '-C', '1', '-W', '10')
     $message = ($raw -join "`n") | ConvertFrom-Json
@@ -130,6 +197,7 @@ try {
     Assert-Check ($grafanaHealth.database -eq 'ok') 'Grafana health failed.'
     Record 'Grafana service health' 'PASS' $grafanaHealth.version
     Check-GrafanaData $stored.timestamp 'Grafana live query'
+    Check-GrafanaDashboardAndRules
 
     if ($TestInterruption) {
         $before = Get-Latest
@@ -175,9 +243,25 @@ try {
         $absoluteReport = [System.IO.Path]::GetFullPath($ReportPath)
         $parent = Split-Path -Parent $absoluteReport
         $null = New-Item -ItemType Directory -Path $parent -Force
-        $report = @{ checkedAtUtc = [DateTimeOffset]::UtcNow.ToString('o'); interruptionRequested = [bool]$TestInterruption; checks = $results.ToArray() }
+        $report = @{
+            checkedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+            interruptionRequested = [bool]$TestInterruption
+            scope = 'Live connectivity, deployed code hashes, dashboard queries and rule health. No live scenario commands are published.'
+            sources = @{
+                simulatorSha256 = (Get-FileHash 'node-red/flows/simulator.json' -Algorithm SHA256).Hash.ToLowerInvariant()
+                ingestSha256 = (Get-FileHash 'node-red/flows/ingest.json' -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+            summary = @{
+                pass = @($results | Where-Object status -eq 'PASS').Count
+                fail = @($results | Where-Object status -eq 'FAIL').Count
+                skip = @($results | Where-Object status -eq 'SKIP').Count
+            }
+            checks = $results.ToArray()
+        }
         [System.IO.File]::WriteAllText($absoluteReport, ($report | ConvertTo-Json -Depth 20), [System.Text.UTF8Encoding]::new($false))
         Write-Host "Report: $absoluteReport"
     }
     Pop-Location
 }
+
+if (@($results | Where-Object status -eq 'FAIL').Count -gt 0) { exit 1 }

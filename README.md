@@ -46,7 +46,7 @@ Flow trong repo là các file export; Compose **không tự import** chúng vào
 3. Nếu cập nhật flow đã có, dùng **Replace** cho các node trùng ID; tránh tạo bản sao các tab và MQTT client.
 4. Bấm **Deploy**. Broker hostname trong flow là `mosquitto`, TDengine là `tdengine`; không thay bằng `localhost` trong container.
 5. Sau 5 giây, ingest bắt đầu setup schema theo từng phản hồi. Chờ node Setup schema hiển thị **schema ready (4/4)**.
-6. Check response tăng `ok`; dùng **show stats** để xem `ok / fail / rejected / skipped`. Khi schema chưa sẵn sàng, `skipped` có thể tăng; sau khi sẵn sàng, nó phải ngừng tăng.
+6. Khi cập nhật simulator, bấm **init state (once)** để nạp lại cấu hình và trạng thái ban đầu. Check response tăng `ok`; dùng **show stats** để xem `ok / fail / rejected / skipped`. Khi schema chưa sẵn sàng, `skipped` có thể tăng; sau khi sẵn sàng, nó phải ngừng tăng.
 
 Các lần chạy sau giữ nguyên flows trong volume `nodered-data`. Không cần import lại nếu mã nguồn không thay đổi.
 
@@ -56,7 +56,7 @@ Các lần chạy sau giữ nguyên flows trong volume `nodered-data`. Không c�
 | --- | --- |
 | `plant/ps01/telemetry` | Snapshot sensor, pump, scenario và alarm active mỗi 2 giây |
 | `plant/ps01/events` | Alarm xuất hiện/kết thúc, chỉ khi trạng thái thay đổi |
-| `plant/ps01/control` | Điều khiển scenario mô phỏng |
+| `plant/ps01/control` | Điều khiển scenario hoặc Run/Stop/Fault từng pump |
 
 Xem bản tin trực tiếp:
 
@@ -75,16 +75,42 @@ Giá trị hợp lệ: `normal`, `pump_fault`, `high_pressure`, `low_level`, `re
 
 | Scenario | Hành vi |
 | --- | --- |
-| normal | P01 chạy, P02 dừng; áp suất/lưu lượng bình thường; level theo cân bằng vào/ra |
+| normal | Thoát manual, bỏ nghẹt; chọn P01 chạy/P02 dừng khi bảo vệ cho phép; level theo cân bằng vào/ra |
 | pump_fault | P01 Fault; P02 chạy sau thời gian chờ; công suất nhỏ hơn làm áp suất/lưu lượng giảm, level tăng |
-| high_pressure | Blockage tăng, áp suất tăng, lưu lượng giảm, level tăng |
-| low_level | Inlet = 0; warning ở 20%, critical ở 10%; pump dừng và bị interlock |
+| high_pressure | Giữ trạng thái các bơm khi vào scenario; blockage tăng làm áp tăng, flow giảm, level tăng nếu đầu ra nhỏ hơn đầu vào |
+| low_level | Inlet = 25 m³/h; P01 ra 40 làm level giảm; warning ở 20% vẫn cho Run, critical ở 10% dừng bơm và khóa Run |
 
-Khi level đạt 90% trong pump_fault/high_pressure, điều tiết inlet giữ mức. Chuyển normal từ trạng thái giữ 90% sẽ hạ dần về 60% rồi khôi phục inlet bình thường. Sau low-level trip, chuyển normal cấp nước lại và chỉ cho pump chạy khi level đạt 60%.
+Bình thường inlet cố định **40 m³/h**, low_level **25 m³/h**, không có dao động đầu vào. Khi không nghẹt:
 
-Tick giữ 2 giây; động học chạy x20 nhưng timestamp vẫn là giờ thực UTC. P02 chờ ít nhất 2 giây thực và được xét tại tick đầu tiên sau đó, không phải callback đúng tuyệt đối 2 giây. Capacity minh họa: P01 40 m³/h; P02 25 m³/h; bể 20 m³.
+| Bơm chạy | Outlet | Level với inlet 40 |
+| --- | --- | --- |
+| Chỉ P01 | 40 m³/h | Giữ nguyên |
+| Chỉ P02 | 25 m³/h | Tăng |
+| Cả hai | 50 m³/h | Giảm |
+| Không bơm nào | 0 | Tăng nếu còn nước vào |
 
-Payload mẫu: [telemetry](examples/telemetry.json), [event](examples/event.json). Đây là ví dụ tĩnh; không phát lại trực tiếp để tránh ghi timestamp cũ.
+**Bảo vệ 90% chỉ chống tràn:** giảm inlet nếu cần, không tăng inlet để bù theo outlet. Tại 90%, outlet=0 thì inlet=0; outlet=25 thì inlet được hạn chế còn 25; hai bơm ra 50 thì inlet tối đa 40 nên level vẫn giảm. LT01 có nhiễu đo nên có thể hơi trên 90 dù mức vật lý không vượt ngưỡng.
+
+Normal không luôn làm level về 60: inlet 40/P01 outlet 40 thì level giữ nguyên kể cả đang ở 90; muốn giảm phải bật thêm P02, tổng outlet 50. Riêng sau trạng thái giữ mức do pump_fault/high_pressure, normal giữ inlet phục hồi ở lưu lượng outlet trước đó; nếu nhỏ hơn outlet P01 thì level giảm về 60 rồi cấp lại 40. Sau LOW_LOW_LEVEL, interlock vẫn chặn Run cho tới khi mức vật lý đạt 60 trong scenario khác low_level, kể cả alarm đã clear sớm hơn. Khi auto, P01 tự chạy lại; khi manual, phải ra lệnh Run.
+
+### Điều khiển riêng từng bơm
+
+Sáu nút `P01/P02 run/stop/fault` gửi tới cùng node Apply scenario. Ví dụ qua MQTT:
+
+```powershell
+'{"pump":"P02","command":"run"}' | docker compose exec -T mosquitto mosquitto_pub -t plant/ps01/control -q 1 -l
+'{"pump":"P01","command":"stop"}' | docker compose exec -T mosquitto mosquitto_pub -t plant/ps01/control -q 1 -l
+```
+
+- Lệnh bơm hợp lệ chuyển trạm sang manual: không tự bật standby, không đổi scenario hay độ nghẹt. Stop/Run đều xóa Fault của bơm được chọn; Run vẫn phải qua bảo vệ.
+- Trong high_pressure, hai bơm vốn đang chạy được tiếp tục chạy. Sau khi Stop một bơm, không cho Run lại khi bơm kia còn chạy. Khi cả hai dừng, được chọn Run một bơm. Giới hạn duy trì suốt scenario high_pressure, kể cả alarm áp suất đã clear; HIGH_PRESSURE còn active cũng chặn bật thêm bơm.
+- Bấm lại cùng scenario lỗi giữ nguyên trạng thái, kể cả manual. Chuyển scenario khác thoát manual; normal/reset vẫn có tác dụng khi bấm lại.
+- LOW_LEVEL bật ở <=20%, clear >25%; LOW_LOW_LEVEL bật <=10%, clear >30%; HIGH_LEVEL bật >=85%, clear <=80%; HIGH_HIGH_LEVEL bật >=90%, clear <=85%; HIGH_PRESSURE bật >6 bar, clear <5,5 bar. PUMP_FAULT active khi ít nhất một bơm Fault.
+- Các alarm/telemetry cập nhật ở tick tiếp theo; thao tác quá nhanh giữa hai tick có thể không xuất hiện thành trạng thái trung gian trong lịch sử.
+
+Tick giữ 2 giây; động học chạy x20 nhưng timestamp vẫn là giờ thực UTC. P02 chờ ít nhất 2 giây thực trong chế độ auto và được xét tại tick đầu tiên sau đó. Bể 20 m³; áp cơ sở P01/P02/cả hai là 4,2/2,625/5,17 bar. Nghẹt tối đa làm outlet P01/P02/cả hai còn 22/13,75/27,5 m³/h, áp tương ứng khoảng 6,3/3,94/7,755 bar trước nhiễu.
+
+Payload mẫu: [telemetry](examples/telemetry.json), [event bật](examples/event.json), [event clear](examples/event-cleared.json), [danh mục lệnh](examples/control-commands.json). Xem [hướng dẫn examples](examples/README.md); đây là ví dụ tĩnh, không phát lại telemetry/event với timestamp cũ. Danh mục lệnh không phải một payload MQTT: chỉ gửi từng phần tử `payloads`.
 
 ## TDengine
 
@@ -115,7 +141,7 @@ TDengine có thể trả HTTP 200 cho SQL lỗi: luôn kiểm tra `code`. Các q
 
 Mở [PS01 Monitoring](http://localhost:3001/d/ps01-monitoring/ps01-pump-station-monitoring). Tài khoản lần đầu là `admin/admin`; lần sau dùng mật khẩu đã đổi. TDengine Explorer dùng tài khoản local demo `root/taosdata`. Cấu hình ingest hiện cũng sử dụng tài khoản demo này.
 
-Datasource `TDengine PS01` nối tới `http://tdengine:6041`, plugin chính thức được cố định ở 4.0.2. Dashboard gồm ba live metrics, ba trends, trạng thái/timeline P01/P02, scenario, simulator alarms, bảng event, danh sách Grafana alerts và thời điểm mẫu mới nhất. Tự refresh mỗi 5 giây; mặc định chọn 30 phút gần nhất. Chọn khoảng thời gian cũ để xem lại lịch sử.
+Datasource `TDengine PS01` nối tới `http://tdengine:6041`, plugin chính thức được cố định ở 4.0.2. Dashboard có 12 panel: ba live metrics, ba trends, hai trạng thái bơm, timeline bơm, bảng event, danh sách Grafana alerts và thời điểm mẫu mới nhất. Hai panel Scenario/Simulator active alarms đã được bỏ; dữ liệu scenario vẫn được lưu trong station_state. Tự refresh mỗi 5 giây; mặc định chọn 30 phút gần nhất. Chọn khoảng thời gian cũ để xem lại lịch sử.
 
 Sáu rule Grafana đánh giá mỗi 10 giây, không có thời gian Pending: **LOW_LEVEL**, **LOW_LOW_LEVEL**, **HIGH_LEVEL**, **HIGH_HIGH_LEVEL**, **HIGH_PRESSURE**, **PUMP_FAULT**. Rule đọc `station_state.active_alarms` từ mẫu mới nhất trong 30 giây để phản ánh trạng thái bật/xóa và hysteresis của simulator, tương ứng các mã trong `alarm_events`. Alert list chỉ hiện cảnh báo đang có vấn đề; rule đã về Normal được ẩn, còn bảng Alarm transitions giữ lịch sử bật/xóa. Scenario là chế độ mô phỏng, còn Normal/Firing là trạng thái của từng rule: chọn normal không xóa ngay alarm mức nước nếu bể chưa qua ngưỡng phục hồi. Chưa cấu hình email/Slack. Dữ liệu mất quá 30 giây sẽ làm rule không có dữ liệu hoặc lỗi datasource; xem timestamp mới nhất để phân biệt số cũ với dữ liệu đang cập nhật.
 
@@ -123,13 +149,23 @@ Các file trong `grafana/provisioning/` tự tạo datasource, dashboard và rul
 
 ## Kiểm thử và demo Level 1
 
-Chạy sau khi hai flow đã deploy và có ít nhất **30 phút dữ liệu thực** (x20 không rút ngắn yêu cầu lịch sử này):
+Kiểm tra scenario offline, không cần container và không phát lệnh điều khiển hệ thống thật; cần Node.js:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify-Level1.ps1
+node .\scripts\Verify-Scenarios.js --report reports/scenario-verification.json
 ```
 
-Script mặc định chỉ kiểm tra. `ExecutionPolicy Bypass` chỉ áp dụng cho tiến trình này, không đổi policy hệ thống. Để kiểm tra query qua Grafana, đặt `GRAFANA_API_TOKEN` trong môi trường tiến trình với token service account có quyền đọc datasource/dashboard. Không đưa token vào Git. Không có token thì script ghi rõ SKIP cho các kiểm tra query Grafana; vẫn cần kiểm tra UI.
+Bộ kiểm tra thực thi mã function simulator với clock giả, kiểm tra từng tick và đưa telemetry/event qua mã ingest thật nhưng không gửi SQL tới database. Có 24 nhóm kiểm tra, gồm cân bằng 40/40 giữ mức và bật thêm P02 để giảm level. Exit 1 nếu có FAIL. Không thay thế demo trực tiếp hay kiểm tra giao diện.
+
+Kiểm tra hệ thống đang chạy sau khi hai flow đã deploy và có ít nhất **30 phút dữ liệu thực** (x20 không rút ngắn yêu cầu lịch sử này):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Verify-Level1.ps1 -ReportPath .\reports\level1-verification-current.json
+```
+
+Script mặc định chỉ kiểm tra: đối chiếu hash function đã deploy, MQTT → TDengine, schema/history, mọi panel dữ liệu và sáu rule Grafana. Không phát lệnh scenario. `ExecutionPolicy Bypass` chỉ áp dụng cho tiến trình này, không đổi policy hệ thống. Để kiểm tra Grafana, đặt `GRAFANA_API_TOKEN` với token service account có quyền đọc datasource/dashboard/alert rules và query datasource. Không đưa token vào Git; không có token thì các mục liên quan ghi SKIP. Xem [scripts/README.md](scripts/README.md) để biết phạm vi từng kiểm tra.
+
+Lần kiểm tra ngày 11/11/2026: **24/24 nhóm offline PASS**; hệ thống chạy **11 PASS, 0 FAIL, 1 SKIP** (không chạy lại ngắt TDengine). Mã function đã deploy khớp repository. Đây là kết quả tại thời điểm kiểm tra, không tự xác nhận phiên bản sau này; báo cáo chứa timestamp và hash nguồn.
 
 Kiểm thử gián đoạn **sẽ dừng riêng TDengine 15 giây**, giữ MQTT và Node-RED chạy, rồi tự bật lại trong `finally`:
 
@@ -155,6 +191,8 @@ grafana/dashboards/                 Dashboard export
 grafana/provisioning/               Datasource/dashboard/alert config
 examples/                          MQTT payload mẫu
 scripts/Verify-Level1.ps1           Kiểm thử lặp lại, có tùy chọn ngắt kết nối
+scripts/Verify-Scenarios.js         Kiểm tra scenario/ingest trong bộ nhớ
+scripts/README.md                   Cách chạy và giới hạn kiểm tra
 docs/DEMO_LEVEL1.md                 Kịch bản demo và checklist nghiệm thu
 ```
 

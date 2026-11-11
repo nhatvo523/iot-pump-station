@@ -1,0 +1,19 @@
+{
+  "topic": "plant/ps01/control",
+  "qos": 1,
+  "retain": false,
+  "note": "Publish one payload at a time, not this entire document. Import/deploy the intended simulator first.",
+  "payloads": [
+    { "scenario": "normal" },
+    { "scenario": "low_level" },
+    { "scenario": "high_pressure" },
+    { "scenario": "pump_fault" },
+    { "scenario": "reset" },
+    { "pump": "P01", "command": "run" },
+    { "pump": "P01", "command": "stop" },
+    { "pump": "P01", "command": "fault" },
+    { "pump": "P02", "command": "run" },
+    { "pump": "P02", "command": "stop" },
+    { "pump": "P02", "command": "fault" }
+  ]
+}

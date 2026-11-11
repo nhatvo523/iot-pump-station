@@ -3,9 +3,9 @@
   "station": "PS01",
   "scenario": "normal",
   "tags": {
-    "LT01": { "asset": "T01", "value": 60.9, "unit": "%", "quality": "good" },
-    "PT01": { "asset": "OUT01", "value": 4.16, "unit": "bar", "quality": "good" },
-    "FT01": { "asset": "OUT01", "value": 39.7, "unit": "m3/h", "quality": "good" }
+    "LT01": { "asset": "T01", "value": 60, "unit": "%", "quality": "good" },
+    "PT01": { "asset": "OUT01", "value": 4.2, "unit": "bar", "quality": "good" },
+    "FT01": { "asset": "OUT01", "value": 40, "unit": "m3/h", "quality": "good" }
   },
   "pumps": {
     "P01": { "status": "Running", "role": "main" },
