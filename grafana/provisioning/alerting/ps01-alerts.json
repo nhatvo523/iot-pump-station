@@ -3,13 +3,13 @@
   "groups": [
     {
       "orgId": 1,
-      "name": "PS01 thresholds",
+      "name": "PS01 alarms",
       "folder": "Pump Station",
       "interval": "10s",
       "rules": [
         {
-          "uid": "ps01-level-high",
-          "title": "PS01 - Tank level >=85%",
+          "uid": "ps01-level-low",
+          "title": "PS01 - LOW_LEVEL",
           "condition": "C",
           "data": [
             {
@@ -27,106 +27,7 @@
                   "uid": "tdengine-ps01"
                 },
                 "queryType": "SQL",
-                "sql": "SELECT ts, val AS reading FROM iot_ps.ps01_lt01 WHERE ts > NOW - 30s ORDER BY ts DESC LIMIT 1",
-                "formatType": "Time series",
-                "intervalMs": 2000,
-                "maxDataPoints": 100
-              }
-            },
-            {
-              "refId": "B",
-              "relativeTimeRange": {
-                "from": 0,
-                "to": 0
-              },
-              "datasourceUid": "__expr__",
-              "model": {
-                "refId": "B",
-                "type": "reduce",
-                "expression": "A",
-                "reducer": "last",
-                "datasource": {
-                  "type": "__expr__",
-                  "uid": "__expr__"
-                }
-              }
-            },
-            {
-              "refId": "C",
-              "relativeTimeRange": {
-                "from": 0,
-                "to": 0
-              },
-              "datasourceUid": "__expr__",
-              "model": {
-                "refId": "C",
-                "type": "threshold",
-                "expression": "B",
-                "datasource": {
-                  "type": "__expr__",
-                  "uid": "__expr__"
-                },
-                "conditions": [
-                  {
-                    "evaluator": {
-                      "type": "gte",
-                      "params": [
-                        85
-                      ]
-                    },
-                    "operator": {
-                      "type": "and"
-                    },
-                    "query": {
-                      "params": [
-                        "C"
-                      ]
-                    },
-                    "reducer": {
-                      "type": "last",
-                      "params": []
-                    },
-                    "type": "query"
-                  }
-                ]
-              }
-            }
-          ],
-          "noDataState": "NoData",
-          "execErrState": "Error",
-          "for": "0s",
-          "annotations": {
-            "summary": "PS01 - Tank level >=85%",
-            "__dashboardUid__": "ps01-monitoring",
-            "__panelId__": "1"
-          },
-          "labels": {
-            "station": "PS01",
-            "severity": "warning"
-          },
-          "isPaused": false
-        },
-        {
-          "uid": "ps01-pressure-high",
-          "title": "PS01 - Outlet pressure >6 bar",
-          "condition": "C",
-          "data": [
-            {
-              "refId": "A",
-              "queryType": "",
-              "relativeTimeRange": {
-                "from": 30,
-                "to": 0
-              },
-              "datasourceUid": "tdengine-ps01",
-              "model": {
-                "refId": "A",
-                "datasource": {
-                  "type": "tdengine-datasource",
-                  "uid": "tdengine-ps01"
-                },
-                "queryType": "SQL",
-                "sql": "SELECT ts, val AS reading FROM iot_ps.ps01_pt01 WHERE ts > NOW - 30s ORDER BY ts DESC LIMIT 1",
+                "sql": "SELECT ts, CASE WHEN active_alarms MATCH '(^|,)LOW_LEVEL(,|$)' THEN 1 ELSE 0 END AS reading FROM iot_ps.ps01_state WHERE ts > NOW - 30s ORDER BY ts DESC LIMIT 1",
                 "formatType": "Time series",
                 "intervalMs": 2000,
                 "maxDataPoints": 100
@@ -170,7 +71,7 @@
                     "evaluator": {
                       "type": "gt",
                       "params": [
-                        6
+                        0
                       ]
                     },
                     "operator": {
@@ -195,13 +96,520 @@
           "execErrState": "Error",
           "for": "0s",
           "annotations": {
-            "summary": "PS01 - Outlet pressure >6 bar",
+            "summary": "PS01 - LOW_LEVEL",
+            "description": "Level <=20%; clears >25%",
+            "__dashboardUid__": "ps01-monitoring",
+            "__panelId__": "1"
+          },
+          "labels": {
+            "station": "PS01",
+            "severity": "warning",
+            "alarm_code": "LOW_LEVEL"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "ps01-level-low-low",
+          "title": "PS01 - LOW_LOW_LEVEL",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": {
+                "from": 30,
+                "to": 0
+              },
+              "datasourceUid": "tdengine-ps01",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "tdengine-datasource",
+                  "uid": "tdengine-ps01"
+                },
+                "queryType": "SQL",
+                "sql": "SELECT ts, CASE WHEN active_alarms MATCH '(^|,)LOW_LOW_LEVEL(,|$)' THEN 1 ELSE 0 END AS reading FROM iot_ps.ps01_state WHERE ts > NOW - 30s ORDER BY ts DESC LIMIT 1",
+                "formatType": "Time series",
+                "intervalMs": 2000,
+                "maxDataPoints": 100
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "expression": "A",
+                "reducer": "last",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                }
+              }
+            },
+            {
+              "refId": "C",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "B",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    },
+                    "type": "query"
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "NoData",
+          "execErrState": "Error",
+          "for": "0s",
+          "annotations": {
+            "summary": "PS01 - LOW_LOW_LEVEL",
+            "description": "Level <=10%; clears >30%",
+            "__dashboardUid__": "ps01-monitoring",
+            "__panelId__": "1"
+          },
+          "labels": {
+            "station": "PS01",
+            "severity": "critical",
+            "alarm_code": "LOW_LOW_LEVEL"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "ps01-level-high",
+          "title": "PS01 - HIGH_LEVEL",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": {
+                "from": 30,
+                "to": 0
+              },
+              "datasourceUid": "tdengine-ps01",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "tdengine-datasource",
+                  "uid": "tdengine-ps01"
+                },
+                "queryType": "SQL",
+                "sql": "SELECT ts, CASE WHEN active_alarms MATCH '(^|,)HIGH_LEVEL(,|$)' THEN 1 ELSE 0 END AS reading FROM iot_ps.ps01_state WHERE ts > NOW - 30s ORDER BY ts DESC LIMIT 1",
+                "formatType": "Time series",
+                "intervalMs": 2000,
+                "maxDataPoints": 100
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "expression": "A",
+                "reducer": "last",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                }
+              }
+            },
+            {
+              "refId": "C",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "B",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    },
+                    "type": "query"
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "NoData",
+          "execErrState": "Error",
+          "for": "0s",
+          "annotations": {
+            "summary": "PS01 - HIGH_LEVEL",
+            "description": "Level >=85%; clears <=80%",
+            "__dashboardUid__": "ps01-monitoring",
+            "__panelId__": "1"
+          },
+          "labels": {
+            "station": "PS01",
+            "severity": "warning",
+            "alarm_code": "HIGH_LEVEL"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "ps01-level-high-high",
+          "title": "PS01 - HIGH_HIGH_LEVEL",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": {
+                "from": 30,
+                "to": 0
+              },
+              "datasourceUid": "tdengine-ps01",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "tdengine-datasource",
+                  "uid": "tdengine-ps01"
+                },
+                "queryType": "SQL",
+                "sql": "SELECT ts, CASE WHEN active_alarms MATCH '(^|,)HIGH_HIGH_LEVEL(,|$)' THEN 1 ELSE 0 END AS reading FROM iot_ps.ps01_state WHERE ts > NOW - 30s ORDER BY ts DESC LIMIT 1",
+                "formatType": "Time series",
+                "intervalMs": 2000,
+                "maxDataPoints": 100
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "expression": "A",
+                "reducer": "last",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                }
+              }
+            },
+            {
+              "refId": "C",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "B",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    },
+                    "type": "query"
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "NoData",
+          "execErrState": "Error",
+          "for": "0s",
+          "annotations": {
+            "summary": "PS01 - HIGH_HIGH_LEVEL",
+            "description": "Level >=90%; clears <=85%",
+            "__dashboardUid__": "ps01-monitoring",
+            "__panelId__": "1"
+          },
+          "labels": {
+            "station": "PS01",
+            "severity": "critical",
+            "alarm_code": "HIGH_HIGH_LEVEL"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "ps01-pressure-high",
+          "title": "PS01 - HIGH_PRESSURE",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": {
+                "from": 30,
+                "to": 0
+              },
+              "datasourceUid": "tdengine-ps01",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "tdengine-datasource",
+                  "uid": "tdengine-ps01"
+                },
+                "queryType": "SQL",
+                "sql": "SELECT ts, CASE WHEN active_alarms MATCH '(^|,)HIGH_PRESSURE(,|$)' THEN 1 ELSE 0 END AS reading FROM iot_ps.ps01_state WHERE ts > NOW - 30s ORDER BY ts DESC LIMIT 1",
+                "formatType": "Time series",
+                "intervalMs": 2000,
+                "maxDataPoints": 100
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "expression": "A",
+                "reducer": "last",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                }
+              }
+            },
+            {
+              "refId": "C",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "B",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    },
+                    "type": "query"
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "NoData",
+          "execErrState": "Error",
+          "for": "0s",
+          "annotations": {
+            "summary": "PS01 - HIGH_PRESSURE",
+            "description": "Pressure >6 bar; clears <5.5 bar",
             "__dashboardUid__": "ps01-monitoring",
             "__panelId__": "2"
           },
           "labels": {
             "station": "PS01",
-            "severity": "warning"
+            "severity": "warning",
+            "alarm_code": "HIGH_PRESSURE"
+          },
+          "isPaused": false
+        },
+        {
+          "uid": "ps01-pump-fault",
+          "title": "PS01 - PUMP_FAULT",
+          "condition": "C",
+          "data": [
+            {
+              "refId": "A",
+              "queryType": "",
+              "relativeTimeRange": {
+                "from": 30,
+                "to": 0
+              },
+              "datasourceUid": "tdengine-ps01",
+              "model": {
+                "refId": "A",
+                "datasource": {
+                  "type": "tdengine-datasource",
+                  "uid": "tdengine-ps01"
+                },
+                "queryType": "SQL",
+                "sql": "SELECT ts, CASE WHEN active_alarms MATCH '(^|,)PUMP_FAULT(,|$)' THEN 1 ELSE 0 END AS reading FROM iot_ps.ps01_state WHERE ts > NOW - 30s ORDER BY ts DESC LIMIT 1",
+                "formatType": "Time series",
+                "intervalMs": 2000,
+                "maxDataPoints": 100
+              }
+            },
+            {
+              "refId": "B",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "B",
+                "type": "reduce",
+                "expression": "A",
+                "reducer": "last",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                }
+              }
+            },
+            {
+              "refId": "C",
+              "relativeTimeRange": {
+                "from": 0,
+                "to": 0
+              },
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "B",
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                },
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "query": {
+                      "params": [
+                        "C"
+                      ]
+                    },
+                    "reducer": {
+                      "type": "last",
+                      "params": []
+                    },
+                    "type": "query"
+                  }
+                ]
+              }
+            }
+          ],
+          "noDataState": "NoData",
+          "execErrState": "Error",
+          "for": "0s",
+          "annotations": {
+            "summary": "PS01 - PUMP_FAULT",
+            "description": "At least one pump is Fault",
+            "__dashboardUid__": "ps01-monitoring",
+            "__panelId__": "9"
+          },
+          "labels": {
+            "station": "PS01",
+            "severity": "critical",
+            "alarm_code": "PUMP_FAULT"
           },
           "isPaused": false
         }
