@@ -74,7 +74,7 @@
     "type": "function",
     "z": "tab1",
     "name": "Init state",
-    "func": "const C = {\n  timeScale: 20,\n  tank: 20, pRated: 4.2, pIdle: 0.2,\n  pumpFlows: { P01: 40, P02: 25 },\n  autoStart: 2,\n  inNom: 40, inAmp: 15, wave: 900,\n  maxBlockage: 0.5, blockageRate: 0.01, flowLoss: 0.9,\n  pressureHalfLife: 2,\n  level: { target: 60, low: 20, lowClear: 25, lowLow: 10, lowLowClear: 30,\n    high: 85, highClear: 80, highHigh: 90, highHighClear: 85 },\n  pressure: { high: 6, clear: 5.5 }\n};\nflow.set('simConfig', C);\nflow.set('sim', {\n  stationId: 'PS01',\n  simulation: { time: 0, seed: 42, scenario: 'normal', inflowFactor: 1, lastTickMs: Date.now() },\n  tank: { id: 'T01', level: C.level.target },\n  pumps: {\n    P01: { role: 'main', status: 'Running' },\n    P02: { role: 'standby', status: 'Stopped' }\n  },\n  inlet: { mode: 'normal', flow: C.inNom, limitedFlow: null },\n  outlet: { id: 'OUT01', pressure: C.pRated, flow: C.pumpFlows.P01, blockage: 0 },\n  controller: { interlock: false, faultTimer: 0, faultStartedAtMs: null },\n  alarms: { LOW_LEVEL: false, LOW_LOW_LEVEL: false, HIGH_LEVEL: false,\n    HIGH_HIGH_LEVEL: false, HIGH_PRESSURE: false, PUMP_FAULT: false }\n});\nnode.status({ fill: 'green', shape: 'dot', text: 'state initialised' });\nreturn null;\n",
+    "func": "const C = {\n  timeScale: 20,\n  tank: 20, pRated: 4.2, pIdle: 0.2,\n  pumpFlows: { P01: 40, P02: 25 },\n  pumpCombos: { P01: { flow: 40, pressure: 4.2 }, P02: { flow: 25, pressure: 2.625 },\n    both: { flow: 50, pressure: 5.17 } },\n  autoStart: 2,\n  inNom: 40,\n  maxBlockage: 0.5, blockageRate: 0.01, flowLoss: 0.9,\n  pressureHalfLife: 2,\n  level: { target: 60, low: 20, lowClear: 25, lowLow: 10, lowLowClear: 30,\n    high: 85, highClear: 80, highHigh: 90, highHighClear: 85 },\n  pressure: { high: 6, clear: 5.5 }\n};\nflow.set('simConfig', C);\nflow.set('sim', {\n  stationId: 'PS01',\n  simulation: { time: 0, seed: 42, scenario: 'normal', inflowFactor: 1, lastTickMs: Date.now() },\n  tank: { id: 'T01', level: C.level.target },\n  pumps: {\n    P01: { role: 'main', status: 'Running' },\n    P02: { role: 'standby', status: 'Stopped' }\n  },\n  inlet: { mode: 'normal', flow: C.inNom, limitedFlow: null },\n  outlet: { id: 'OUT01', pressure: C.pRated, flow: C.pumpFlows.P01, blockage: 0 },\n  controller: { manual: false, interlock: false, faultTimer: 0, faultStartedAtMs: null },\n  alarms: { LOW_LEVEL: false, LOW_LOW_LEVEL: false, HIGH_LEVEL: false,\n    HIGH_HIGH_LEVEL: false, HIGH_PRESSURE: false, PUMP_FAULT: false }\n});\nnode.status({ fill: 'green', shape: 'dot', text: 'state initialised' });\nreturn null;\n",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -117,7 +117,7 @@
     "type": "function",
     "z": "tab1",
     "name": "Sim tick",
-    "func": "const C = flow.get('simConfig');\nconst s = flow.get('sim');\nif (!s || !C) { node.warn('State not initialised'); return null; }\nconst A = s.alarms;\n\n// Advance the seeded random number generator.\nfunction rnd() {\n  s.simulation.seed = (s.simulation.seed + 0x6D2B79F5) | 0;\n  let t = s.simulation.seed;\n  t = Math.imul(t ^ (t >>> 15), t | 1);\n  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);\n  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;\n}\n// Generate Gaussian measurement noise.\nfunction gauss(sd) {\n  const u = 1 - rnd(), v = rnd();\n  return sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);\n}\nconst clamp = (x, a, b) => Math.min(b, Math.max(a, x));\nconst round = (x, d) => Math.round(x * 10 ** d) / 10 ** d;\n\n// Increase blockage using simulated seconds, not the number of ticks.\nfunction rampBlockage(dt) {\n  if (s.simulation.scenario === 'high_pressure') {\n    s.outlet.blockage = Math.min(C.maxBlockage, s.outlet.blockage + C.blockageRate * dt);\n  }\n}\n\n// Balance the tank with the previous interval's outlet flow and regulate its inlet.\nfunction updateTank(dt) {\n  const outlet = s.outlet.flow;\n  let qin = 0;\n  if (s.simulation.inflowFactor > 0) {\n    if (s.inlet.mode === 'hold') qin = outlet;\n    else if (s.inlet.mode === 'recover') qin = s.inlet.limitedFlow;\n    else qin = Math.max(0, C.inNom * s.simulation.inflowFactor +\n      C.inAmp * Math.sin(2 * Math.PI * s.simulation.time / C.wave));\n  }\n  const factor = dt / 3600 / (C.tank * 0.01);\n  let next = s.tank.level + (qin - outlet) * factor;\n  if (s.simulation.inflowFactor > 0 && s.inlet.mode === 'normal' && next >= C.level.highHigh) {\n    if (factor > 0) qin = Math.max(0, outlet + (C.level.highHigh - s.tank.level) / factor);\n    next = C.level.highHigh;\n    s.inlet.mode = 'hold';\n  } else if (s.inlet.mode === 'recover' && next <= C.level.target) {\n    if (factor > 0) qin = Math.max(0, outlet + (C.level.target - s.tank.level) / factor);\n    next = C.level.target;\n    s.inlet.mode = 'normal';\n    s.inlet.limitedFlow = null;\n  }\n  s.inlet.flow = qin;\n  s.tank.level = clamp(next, 0, 100);\n  return clamp(round(s.tank.level + gauss(0.15), 1), 0, 100);\n}\n\n// Evaluate measured level alarms; low-low protection stays latched until refill to 60%.\nfunction evaluateLevelAlarms(lt) {\n  if (!A.LOW_LEVEL && lt <= C.level.low) A.LOW_LEVEL = true;\n  else if (A.LOW_LEVEL && lt > C.level.lowClear) A.LOW_LEVEL = false;\n  if (!A.LOW_LOW_LEVEL && lt <= C.level.lowLow) A.LOW_LOW_LEVEL = true;\n  else if (A.LOW_LOW_LEVEL && lt > C.level.lowLowClear) A.LOW_LOW_LEVEL = false;\n  if (!A.HIGH_LEVEL && lt >= C.level.high) A.HIGH_LEVEL = true;\n  else if (A.HIGH_LEVEL && lt <= C.level.highClear) A.HIGH_LEVEL = false;\n  if (!A.HIGH_HIGH_LEVEL && lt >= C.level.highHigh) A.HIGH_HIGH_LEVEL = true;\n  else if (A.HIGH_HIGH_LEVEL && lt <= C.level.highHighClear) A.HIGH_HIGH_LEVEL = false;\n  if (A.LOW_LOW_LEVEL) s.controller.interlock = true;\n}\n\n// Enforce low-level refill and the standby delay measured in real seconds.\nfunction runController(nowMs) {\n  if (s.controller.interlock && !A.LOW_LOW_LEVEL &&\n      s.simulation.scenario !== 'low_level' && s.tank.level >= C.level.target) {\n    s.controller.interlock = false;\n    if (s.pumps.P01.status !== 'Fault') s.pumps.P01.status = 'Running';\n  }\n  if (s.controller.interlock) {\n    if (s.pumps.P01.status === 'Running') s.pumps.P01.status = 'Stopped';\n    if (s.pumps.P02.status === 'Running') s.pumps.P02.status = 'Stopped';\n  }\n  if (s.pumps.P01.status === 'Fault' && s.pumps.P02.status === 'Stopped') {\n    s.controller.faultTimer = Math.max(0, (nowMs - s.controller.faultStartedAtMs) / 1000);\n    if (!s.controller.interlock && s.controller.faultTimer >= C.autoStart) {\n      s.pumps.P02.status = 'Running';\n    }\n  }\n}\n\n// Sum per-pump capacity and apply blockage and the scaled pressure response.\nfunction computeOutlet(dt) {\n  const capacity = Object.keys(s.pumps).reduce((sum, id) =>\n    sum + (s.pumps[id].status === 'Running' ? C.pumpFlows[id] : 0), 0);\n  s.outlet.flow = capacity * (1 - C.flowLoss * s.outlet.blockage);\n  const pTarget = capacity > 0\n    ? C.pRated * (capacity / C.pumpFlows.P01) * (1 + s.outlet.blockage)\n    : C.pIdle;\n  s.outlet.pressure += (pTarget - s.outlet.pressure) * (1 - Math.pow(0.5, dt / C.pressureHalfLife));\n  const ft = capacity > 0 ? Math.max(0.1, round(s.outlet.flow + gauss(0.4), 1)) : 0;\n  const pt = Math.max(0, round(s.outlet.pressure + gauss(0.03), 2));\n  return { ft, pt };\n}\n\n// Evaluate pressure hysteresis and preserve fault alarms while the standby runs.\nfunction evaluatePressureAndPumpAlarms(pt) {\n  if (!A.HIGH_PRESSURE && pt > C.pressure.high) A.HIGH_PRESSURE = true;\n  else if (A.HIGH_PRESSURE && pt < C.pressure.clear) A.HIGH_PRESSURE = false;\n  A.PUMP_FAULT = Object.values(s.pumps).some(p => p.status === 'Fault');\n}\n\n// Publish the existing telemetry shape and one event for each alarm transition.\nfunction buildMessages(lt, out, prev) {\n  const { ft, pt } = out;\n  const now = new Date().toISOString();\n  const info = {\n    LOW_LEVEL: { sev: 'warning', tag: 'LT01', val: lt, thr: C.level.low },\n    LOW_LOW_LEVEL: { sev: 'critical', tag: 'LT01', val: lt, thr: C.level.lowLow },\n    HIGH_LEVEL: { sev: 'warning', tag: 'LT01', val: lt, thr: C.level.high },\n    HIGH_HIGH_LEVEL: { sev: 'critical', tag: 'LT01', val: lt, thr: C.level.highHigh },\n    HIGH_PRESSURE: { sev: 'warning', tag: 'PT01', val: pt, thr: C.pressure.high },\n    PUMP_FAULT: { sev: 'critical' }\n  };\n  const events = [];\n  for (const code of Object.keys(A)) {\n    if (A[code] !== prev[code]) {\n      const i = info[code];\n      const ev = { ts: now, station: s.stationId, code, severity: i.sev, active: A[code] };\n      if (i.tag) { ev.tag = i.tag; ev.value = i.val; ev.threshold = i.thr; }\n      events.push({ topic: 'plant/ps01/events', payload: ev });\n    }\n  }\n  const tele = {\n    topic: 'plant/ps01/telemetry',\n    payload: {\n      ts: now, station: s.stationId, scenario: s.simulation.scenario,\n      tags: {\n        LT01: { asset: s.tank.id, value: lt, unit: '%', quality: 'good' },\n        PT01: { asset: s.outlet.id, value: pt, unit: 'bar', quality: 'good' },\n        FT01: { asset: s.outlet.id, value: ft, unit: 'm3/h', quality: 'good' }\n      },\n      pumps: {\n        P01: { status: s.pumps.P01.status, role: s.pumps.P01.role },\n        P02: { status: s.pumps.P02.status, role: s.pumps.P02.role }\n      },\n      alarms: Object.keys(A).filter(k => A[k])\n    }\n  };\n  flow.set('sim', s);\n  node.status({ text: `${s.simulation.scenario} | L=${lt} P=${pt} F=${ft}` });\n  return [tele, events];\n}\n\n// Scale elapsed real time once; the standby timer uses the unscaled clock.\nfunction tick() {\n  const nowMs = Date.now();\n  const dt = Math.max(0, nowMs - s.simulation.lastTickMs) / 1000 * C.timeScale;\n  s.simulation.lastTickMs = nowMs;\n  s.simulation.time += dt;\n  const prev = Object.assign({}, A);\n  rampBlockage(dt);\n  const lt = updateTank(dt);\n  evaluateLevelAlarms(lt);\n  runController(nowMs);\n  const out = computeOutlet(dt);\n  evaluatePressureAndPumpAlarms(out.pt);\n  return buildMessages(lt, out, prev);\n}\nreturn tick();\n",
+    "func": "const C = flow.get('simConfig');\nconst s = flow.get('sim');\nif (!s || !C) { node.warn('State not initialised'); return null; }\nconst A = s.alarms;\n\n// Advance the seeded random number generator.\nfunction rnd() {\n  s.simulation.seed = (s.simulation.seed + 0x6D2B79F5) | 0;\n  let t = s.simulation.seed;\n  t = Math.imul(t ^ (t >>> 15), t | 1);\n  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);\n  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;\n}\n// Generate Gaussian measurement noise.\nfunction gauss(sd) {\n  const u = 1 - rnd(), v = rnd();\n  return sd * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);\n}\nconst clamp = (x, a, b) => Math.min(b, Math.max(a, x));\nconst round = (x, d) => Math.round(x * 10 ** d) / 10 ** d;\n\n// Increase blockage using simulated seconds, not the number of ticks.\nfunction rampBlockage(dt) {\n  if (s.simulation.scenario === 'high_pressure') {\n    s.outlet.blockage = Math.min(C.maxBlockage, s.outlet.blockage + C.blockageRate * dt);\n  }\n}\n\n// Balance the tank using the previous interval's outlet flow.\n// The upper limit only reduces inlet flow; it never adds water to hold the level.\nfunction updateTank(dt) {\n  const outlet = s.outlet.flow;\n  const nominalInlet = Math.max(0, C.inNom * s.simulation.inflowFactor);\n  let qin = nominalInlet;\n  if (s.inlet.mode === 'recover') {\n    qin = Math.min(nominalInlet, Math.max(0, s.inlet.limitedFlow));\n  }\n  const factor = dt / 3600 / (C.tank * 0.01);\n  let next = s.tank.level + (qin - outlet) * factor;\n  if (next >= C.level.highHigh) {\n    if (factor > 0) {\n      const safeInlet = Math.max(0, outlet + (C.level.highHigh - s.tank.level) / factor);\n      qin = Math.min(qin, safeInlet);\n    }\n    next = Math.min(C.level.highHigh, s.tank.level + (qin - outlet) * factor);\n    if (s.inlet.mode === 'normal') s.inlet.mode = 'hold';\n  } else if (s.inlet.mode === 'recover' && next <= C.level.target) {\n    // Finish recovery without exceeding the normal supply to force a level target.\n    if (factor > 0 && s.tank.level >= C.level.target) {\n      const targetInlet = Math.max(0, outlet + (C.level.target - s.tank.level) / factor);\n      qin = Math.min(nominalInlet, targetInlet);\n      next = s.tank.level + (qin - outlet) * factor;\n    }\n    s.inlet.mode = 'normal';\n    s.inlet.limitedFlow = null;\n  }\n  s.inlet.flow = qin;\n  s.tank.level = clamp(next, 0, 100);\n  return clamp(round(s.tank.level + gauss(0.15), 1), 0, 100);\n}\n\n// Evaluate measured level alarms; low-low protection stays latched until refill to 60%.\nfunction evaluateLevelAlarms(lt) {\n  if (!A.LOW_LEVEL && lt <= C.level.low) A.LOW_LEVEL = true;\n  else if (A.LOW_LEVEL && lt > C.level.lowClear) A.LOW_LEVEL = false;\n  if (!A.LOW_LOW_LEVEL && lt <= C.level.lowLow) A.LOW_LOW_LEVEL = true;\n  else if (A.LOW_LOW_LEVEL && lt > C.level.lowLowClear) A.LOW_LOW_LEVEL = false;\n  if (!A.HIGH_LEVEL && lt >= C.level.high) A.HIGH_LEVEL = true;\n  else if (A.HIGH_LEVEL && lt <= C.level.highClear) A.HIGH_LEVEL = false;\n  if (!A.HIGH_HIGH_LEVEL && lt >= C.level.highHigh) A.HIGH_HIGH_LEVEL = true;\n  else if (A.HIGH_HIGH_LEVEL && lt <= C.level.highHighClear) A.HIGH_HIGH_LEVEL = false;\n  if (A.LOW_LOW_LEVEL) s.controller.interlock = true;\n}\n\n// Enforce low-level refill and the standby delay measured in real seconds.\nfunction runController(nowMs) {\n  if (s.controller.interlock && !A.LOW_LOW_LEVEL &&\n      s.simulation.scenario !== 'low_level' && s.tank.level >= C.level.target) {\n    s.controller.interlock = false;\n    if (!s.controller.manual && s.pumps.P01.status !== 'Fault') s.pumps.P01.status = 'Running';\n  }\n  if (s.controller.interlock) {\n    if (s.pumps.P01.status === 'Running') s.pumps.P01.status = 'Stopped';\n    if (s.pumps.P02.status === 'Running') s.pumps.P02.status = 'Stopped';\n  }\n  if (!s.controller.manual && s.pumps.P01.status === 'Fault' && s.pumps.P02.status === 'Stopped') {\n    s.controller.faultTimer = Math.max(0, (nowMs - s.controller.faultStartedAtMs) / 1000);\n    if (!s.controller.interlock && !A.LOW_LOW_LEVEL &&\n        s.controller.faultTimer >= C.autoStart) {\n      s.pumps.P02.status = 'Running';\n    }\n  }\n}\n\n// Choose a calibrated operating point, then apply blockage and pressure response.\nfunction computeOutlet(dt) {\n  const p1 = s.pumps.P01.status === 'Running';\n  const p2 = s.pumps.P02.status === 'Running';\n  const entry = p1 && p2 ? C.pumpCombos.both : p1 ? C.pumpCombos.P01 : p2 ? C.pumpCombos.P02 : null;\n  const capacity = entry ? entry.flow : 0;\n  s.outlet.flow = capacity * (1 - C.flowLoss * s.outlet.blockage);\n  const pTarget = entry ? entry.pressure * (1 + s.outlet.blockage) : C.pIdle;\n  s.outlet.pressure += (pTarget - s.outlet.pressure) * (1 - Math.pow(0.5, dt / C.pressureHalfLife));\n  const ft = capacity > 0 ? Math.max(0.1, round(s.outlet.flow + gauss(0.4), 1)) : 0;\n  const pt = Math.max(0, round(s.outlet.pressure + gauss(0.03), 2));\n  return { ft, pt };\n}\n\n// Evaluate pressure hysteresis and preserve fault alarms while the standby runs.\nfunction evaluatePressureAndPumpAlarms(pt) {\n  if (!A.HIGH_PRESSURE && pt > C.pressure.high) A.HIGH_PRESSURE = true;\n  else if (A.HIGH_PRESSURE && pt < C.pressure.clear) A.HIGH_PRESSURE = false;\n  A.PUMP_FAULT = Object.values(s.pumps).some(p => p.status === 'Fault');\n}\n\n// Publish the existing telemetry shape and one event for each alarm transition.\nfunction buildMessages(lt, out, prev) {\n  const { ft, pt } = out;\n  const now = new Date().toISOString();\n  const info = {\n    LOW_LEVEL: { sev: 'warning', tag: 'LT01', val: lt, thr: C.level.low },\n    LOW_LOW_LEVEL: { sev: 'critical', tag: 'LT01', val: lt, thr: C.level.lowLow },\n    HIGH_LEVEL: { sev: 'warning', tag: 'LT01', val: lt, thr: C.level.high },\n    HIGH_HIGH_LEVEL: { sev: 'critical', tag: 'LT01', val: lt, thr: C.level.highHigh },\n    HIGH_PRESSURE: { sev: 'warning', tag: 'PT01', val: pt, thr: C.pressure.high },\n    PUMP_FAULT: { sev: 'critical' }\n  };\n  const events = [];\n  for (const code of Object.keys(A)) {\n    if (A[code] !== prev[code]) {\n      const i = info[code];\n      const ev = { ts: now, station: s.stationId, code, severity: i.sev, active: A[code] };\n      if (i.tag) { ev.tag = i.tag; ev.value = i.val; ev.threshold = i.thr; }\n      events.push({ topic: 'plant/ps01/events', payload: ev });\n    }\n  }\n  const tele = {\n    topic: 'plant/ps01/telemetry',\n    payload: {\n      ts: now, station: s.stationId, scenario: s.simulation.scenario,\n      tags: {\n        LT01: { asset: s.tank.id, value: lt, unit: '%', quality: 'good' },\n        PT01: { asset: s.outlet.id, value: pt, unit: 'bar', quality: 'good' },\n        FT01: { asset: s.outlet.id, value: ft, unit: 'm3/h', quality: 'good' }\n      },\n      pumps: {\n        P01: { status: s.pumps.P01.status, role: s.pumps.P01.role },\n        P02: { status: s.pumps.P02.status, role: s.pumps.P02.role }\n      },\n      alarms: Object.keys(A).filter(k => A[k])\n    }\n  };\n  flow.set('sim', s);\n  node.status({ text: `${s.simulation.scenario} | L=${lt} P=${pt} F=${ft}` });\n  return [tele, events];\n}\n\n// Scale elapsed real time once; the standby timer uses the unscaled clock.\nfunction tick() {\n  const nowMs = Date.now();\n  const dt = Math.max(0, nowMs - s.simulation.lastTickMs) / 1000 * C.timeScale;\n  s.simulation.lastTickMs = nowMs;\n  s.simulation.time += dt;\n  const prev = Object.assign({}, A);\n  rampBlockage(dt);\n  const lt = updateTank(dt);\n  evaluateLevelAlarms(lt);\n  runController(nowMs);\n  const out = computeOutlet(dt);\n  evaluatePressureAndPumpAlarms(out.pt);\n  return buildMessages(lt, out, prev);\n}\nreturn tick();\n",
     "outputs": 2,
     "timeout": 0,
     "noerr": 0,
@@ -332,7 +332,7 @@
     "type": "function",
     "z": "tab1",
     "name": "Apply scenario",
-    "func": "const cmd = msg.payload && msg.payload.scenario;\nconst valid = ['normal', 'reset', 'low_level', 'high_pressure', 'pump_fault'];\nlet s = flow.get('sim');\nconst C = flow.get('simConfig');\nif (!s || !C) { node.warn('State not initialised'); return null; }\nif (!valid.includes(cmd)) {\n  node.warn('Unknown scenario: ' + JSON.stringify(msg.payload));\n  return null;\n}\n\n// Reset physical state and RNG, retaining alarm flags until their closing events are emitted.\nfunction resetState() {\n  return {\n    stationId: 'PS01',\n    simulation: { time: 0, seed: 42, scenario: 'normal', inflowFactor: 1, lastTickMs: Date.now() },\n    tank: { id: 'T01', level: C.level.target },\n    pumps: {\n      P01: { role: 'main', status: 'Running' },\n      P02: { role: 'standby', status: 'Stopped' }\n    },\n    inlet: { mode: 'normal', flow: C.inNom, limitedFlow: null },\n    outlet: { id: 'OUT01', pressure: C.pRated, flow: C.pumpFlows.P01, blockage: 0 },\n    controller: { interlock: false, faultTimer: 0, faultStartedAtMs: null },\n    alarms: s.alarms\n  };\n}\n\nif (cmd === 'reset') {\n  s = resetState();\n} else if (cmd !== s.simulation.scenario) {\n  if (cmd === 'normal') {\n    if (s.inlet.mode === 'hold') {\n      s.inlet.mode = 'recover';\n      s.inlet.limitedFlow = s.outlet.flow;\n    }\n  } else {\n    s.inlet.mode = 'normal';\n    s.inlet.limitedFlow = null;\n  }\n  s.simulation.scenario = cmd;\n  s.simulation.inflowFactor = cmd === 'low_level' ? 0 : 1;\n  s.outlet.blockage = 0;\n  s.controller.faultTimer = 0;\n  s.controller.faultStartedAtMs = cmd === 'pump_fault' ? Date.now() : null;\n  s.pumps.P01.status = cmd === 'pump_fault' ? 'Fault'\n    : (s.controller.interlock ? 'Stopped' : 'Running');\n  s.pumps.P02.status = 'Stopped';\n}\nflow.set('sim', s);\nnode.status({ fill: 'blue', shape: 'dot', text: 'scenario: ' + s.simulation.scenario });\nmsg.payload = { applied: s.simulation.scenario };\nreturn msg;\n",
+    "func": "const payload = msg.payload;\nconst cmd = payload && payload.scenario;\nconst valid = ['normal', 'reset', 'low_level', 'high_pressure', 'pump_fault'];\nlet s = flow.get('sim');\nconst C = flow.get('simConfig');\nif (!s || !C) { node.warn('State not initialised'); return null; }\n\n// Validate and enforce protections before changing any state.\nconst pumpRequest = payload && typeof payload === 'object' &&\n  ('pump' in payload || 'command' in payload);\nif (pumpRequest || !valid.includes(cmd)) {\n  const pump = payload && payload.pump;\n  const command = payload && payload.command;\n  if (!pumpRequest || !['P01', 'P02'].includes(pump) ||\n      !['run', 'stop', 'fault'].includes(command) || cmd !== undefined) {\n    node.warn('Bad pump command: ' + JSON.stringify(payload));\n    return null;\n  }\n  if (command === 'run') {\n    if (s.controller.interlock) {\n      node.warn('Run rejected: low-level interlock active');\n      return null;\n    }\n    if (s.alarms.LOW_LOW_LEVEL) {\n      node.warn('Run rejected: low-low-level alarm active');\n      return null;\n    }\n    const other = pump === 'P01' ? 'P02' : 'P01';\n    if ((s.simulation.scenario === 'high_pressure' || s.alarms.HIGH_PRESSURE) &&\n        s.pumps[other].status === 'Running') {\n      node.warn('Run rejected: high pressure permits only one running pump');\n      return null;\n    }\n  }\n  const previous = s.pumps[pump].status;\n  s.controller.manual = true;\n  s.pumps[pump].status = { run: 'Running', stop: 'Stopped', fault: 'Fault' }[command];\n  if (command === 'fault' && previous !== 'Fault') {\n    s.controller.faultStartedAtMs = Date.now();\n    s.controller.faultTimer = 0;\n  } else if (!Object.values(s.pumps).some(p => p.status === 'Fault')) {\n    s.controller.faultStartedAtMs = null;\n    s.controller.faultTimer = 0;\n  }\n  flow.set('sim', s);\n  node.status({ fill: 'blue', shape: 'dot', text: 'manual: ' + pump + ' ' + command });\n  msg.payload = { applied: pump + ' ' + command };\n  return msg;\n}\n\n// Reset physical state and RNG, retaining alarm flags until their closing events are emitted.\nfunction resetState() {\n  return {\n    stationId: 'PS01',\n    simulation: { time: 0, seed: 42, scenario: 'normal', inflowFactor: 1, lastTickMs: Date.now() },\n    tank: { id: 'T01', level: C.level.target },\n    pumps: {\n      P01: { role: 'main', status: 'Running' },\n      P02: { role: 'standby', status: 'Stopped' }\n    },\n    inlet: { mode: 'normal', flow: C.inNom, limitedFlow: null },\n    outlet: { id: 'OUT01', pressure: C.pRated, flow: C.pumpFlows.P01, blockage: 0 },\n    controller: { manual: false, interlock: false, faultTimer: 0, faultStartedAtMs: null },\n    alarms: s.alarms\n  };\n}\n\nif (cmd === 'reset') {\n  s = resetState();\n} else if (cmd !== s.simulation.scenario || cmd === 'normal') {\n  if (cmd === 'normal') {\n    if (s.inlet.mode === 'hold') {\n      s.inlet.mode = 'recover';\n      s.inlet.limitedFlow = s.outlet.flow;\n    }\n  } else {\n    s.inlet.mode = 'normal';\n    s.inlet.limitedFlow = null;\n  }\n  s.controller.manual = false;\n  s.simulation.scenario = cmd;\n  s.simulation.inflowFactor = cmd === 'low_level' ? 25 / C.inNom : 1;\n  s.outlet.blockage = 0;\n  s.controller.faultTimer = 0;\n  s.controller.faultStartedAtMs = cmd === 'pump_fault' ? Date.now() : null;\n  // Entering high pressure changes the hydraulics, not the existing pump states.\n  // LOW_LOW_LEVEL protection remains enforced by the controller on each tick.\n  if (cmd !== 'high_pressure') {\n    const lowBlocksStart = s.alarms.LOW_LOW_LEVEL;\n    s.pumps.P01.status = cmd === 'pump_fault' ? 'Fault'\n      : (s.controller.interlock || lowBlocksStart ? 'Stopped' : 'Running');\n    s.pumps.P02.status = 'Stopped';\n  }\n}\nflow.set('sim', s);\nnode.status({ fill: 'blue', shape: 'dot', text: 'scenario: ' + s.simulation.scenario });\nmsg.payload = { applied: s.simulation.scenario };\nreturn msg;\n",
     "outputs": 1,
     "timeout": 0,
     "noerr": 0,
@@ -407,5 +407,155 @@
     "x": 340,
     "y": 610,
     "wires": []
+  },
+  {
+    "id": "b_p1_run",
+    "type": "inject",
+    "z": "tab1",
+    "name": "P01 run",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"pump\":\"P01\",\"command\":\"run\"}",
+    "payloadType": "json",
+    "x": 130,
+    "y": 720,
+    "wires": [
+      [
+        "f_ctl"
+      ]
+    ]
+  },
+  {
+    "id": "b_p1_stop",
+    "type": "inject",
+    "z": "tab1",
+    "name": "P01 stop",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"pump\":\"P01\",\"command\":\"stop\"}",
+    "payloadType": "json",
+    "x": 130,
+    "y": 760,
+    "wires": [
+      [
+        "f_ctl"
+      ]
+    ]
+  },
+  {
+    "id": "b_p1_fault",
+    "type": "inject",
+    "z": "tab1",
+    "name": "P01 fault",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"pump\":\"P01\",\"command\":\"fault\"}",
+    "payloadType": "json",
+    "x": 130,
+    "y": 800,
+    "wires": [
+      [
+        "f_ctl"
+      ]
+    ]
+  },
+  {
+    "id": "b_p2_run",
+    "type": "inject",
+    "z": "tab1",
+    "name": "P02 run",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"pump\":\"P02\",\"command\":\"run\"}",
+    "payloadType": "json",
+    "x": 340,
+    "y": 720,
+    "wires": [
+      [
+        "f_ctl"
+      ]
+    ]
+  },
+  {
+    "id": "b_p2_stop",
+    "type": "inject",
+    "z": "tab1",
+    "name": "P02 stop",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"pump\":\"P02\",\"command\":\"stop\"}",
+    "payloadType": "json",
+    "x": 340,
+    "y": 760,
+    "wires": [
+      [
+        "f_ctl"
+      ]
+    ]
+  },
+  {
+    "id": "b_p2_fault",
+    "type": "inject",
+    "z": "tab1",
+    "name": "P02 fault",
+    "props": [
+      {
+        "p": "payload"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": false,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "{\"pump\":\"P02\",\"command\":\"fault\"}",
+    "payloadType": "json",
+    "x": 340,
+    "y": 800,
+    "wires": [
+      [
+        "f_ctl"
+      ]
+    ]
   }
 ]
