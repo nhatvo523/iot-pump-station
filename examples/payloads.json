@@ -1,0 +1,60 @@
+{
+  "telemetry": {
+    "ts": "2026-11-10T08:00:00.000Z",
+    "station": "PS01",
+    "scenario": "normal",
+    "tags": {
+      "LT01": {
+        "asset": "T01",
+        "value": 60,
+        "unit": "%",
+        "quality": "good"
+      },
+      "PT01": {
+        "asset": "OUT01",
+        "value": 4.2,
+        "unit": "bar",
+        "quality": "good"
+      },
+      "FT01": {
+        "asset": "OUT01",
+        "value": 40,
+        "unit": "m3/h",
+        "quality": "good"
+      }
+    },
+    "pumps": {
+      "P01": {
+        "status": "Running",
+        "role": "main"
+      },
+      "P02": {
+        "status": "Stopped",
+        "role": "standby"
+      }
+    },
+    "alarms": []
+  },
+  "events": [
+    {
+      "ts": "2026-11-10T08:01:00.000Z",
+      "station": "PS01",
+      "code": "HIGH_LEVEL",
+      "severity": "warning",
+      "active": true,
+      "tag": "LT01",
+      "value": 85.3,
+      "threshold": 85
+    },
+    {
+      "ts": "2026-11-10T08:02:00.000Z",
+      "station": "PS01",
+      "code": "HIGH_LEVEL",
+      "severity": "warning",
+      "active": false,
+      "tag": "LT01",
+      "value": 79.8,
+      "threshold": 85
+    }
+  ]
+}

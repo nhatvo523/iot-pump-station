@@ -121,7 +121,7 @@ Sáu nút `P01/P02 run/stop/fault` gửi tới cùng node Apply scenario. Ví d�
 
 Tick giữ 2 giây; mức bể và thời gian mô phỏng chạy x20, timestamp vẫn là giờ thực UTC. Lưu lượng và áp suất chuyển tiếp theo giây thực: hằng số thời gian tăng/giảm lưu lượng là 8/4 giây, áp suất là 8/6 giây; sau khi dừng bơm vẫn có dòng chảy dư ngắn trước khi về 0. Nghẹt tăng tới tối đa trong 60 giây thực. P02 chờ ít nhất 4 giây thực trong chế độ auto và được xét tại tick đầu tiên sau đó. Bể 20 m³; áp cơ sở P01/P02/cả hai là 4,2/2,625/5,17 bar. Nghẹt tối đa làm outlet P01/P02/cả hai còn 22/13,75/27,5 m³/h, áp tương ứng khoảng 6,3/3,94/7,755 bar trước nhiễu.
 
-Payload mẫu: [telemetry](examples/telemetry.json), [event bật](examples/event.json), [event clear](examples/event-cleared.json), [danh mục lệnh](examples/control-commands.json). Xem [hướng dẫn examples](examples/README.md); đây là ví dụ tĩnh, không phát lại telemetry/event với timestamp cũ. Danh mục lệnh không phải một payload MQTT: chỉ gửi từng phần tử `payloads`.
+Payload mẫu: [telemetry và event bật/xóa](examples/payloads.json), [danh mục lệnh](examples/control-commands.json). Xem [hướng dẫn examples](examples/README.md); đây là ví dụ tĩnh, không phát lại telemetry/event với timestamp cũ. Các file là tập hợp mẫu, không phải một payload MQTT: lấy riêng `telemetry`, từng phần tử `events`, hoặc từng phần tử `payloads` trong danh mục lệnh.
 
 ## TDengine
 

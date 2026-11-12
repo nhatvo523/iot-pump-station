@@ -142,14 +142,23 @@ test('Normal: inlet 40, P01 outlet 40, level balanced', () => {
 });
 test('Example telemetry and activation/clearing events are accepted by ingest', () => {
   const h = makeHarness();
-  for (const [file, id] of [['telemetry.json', 'f_tele'], ['event.json', 'f_evt'], ['event-cleared.json', 'f_evt']]) {
-    const payload = JSON.parse(fs.readFileSync(path.join(root, 'examples', file), 'utf8'));
-    h.normalize(id, { payload });
-  }
+  const samples = JSON.parse(fs.readFileSync(path.join(root, 'examples/payloads.json'), 'utf8'));
+  h.normalize('f_tele', { payload: samples.telemetry });
+  assert.equal(samples.events.length, 2, 'Expected activation and clearing samples');
+  assert.equal(samples.events[0].active, true);
+  assert.equal(samples.events[1].active, false);
+  assert.equal(samples.events[0].code, samples.events[1].code);
+  for (const payload of samples.events) h.normalize('f_evt', { payload });
   const catalogue = JSON.parse(fs.readFileSync(path.join(root, 'examples/control-commands.json'), 'utf8'));
   for (const payload of catalogue.payloads) {
     const isolated = makeHarness();
+    // Exercise disable commands against an active cause, not an already-off no-op.
+    if (payload.active === false) {
+      assert.ok(isolated.scenario(payload.scenario));
+      assert.equal(isolated.s.simulation.triggers[payload.scenario], true);
+    }
     assert.ok(isolated.control(payload), 'Example command was rejected: ' + JSON.stringify(payload));
+    if (payload.active === false) assert.equal(isolated.s.simulation.triggers[payload.scenario], false);
   }
 });
 test('P02 alone: outlet 25, level rises', () => {
