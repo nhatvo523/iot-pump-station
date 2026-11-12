@@ -22,7 +22,7 @@
 | 12–14 | Ngắt database và phục hồi | Chạy script interruption; MQTT vẫn cập nhật; SQL tạm lỗi, rồi database và charts nhận dữ liệu mới |
 | 14–15 | Tổng kết giới hạn và bàn giao | Chỉ rõ gap dữ liệu khi ngắt, chưa retry INSERT; giới thiệu exports/config và tài liệu |
 
-Thời gian scenario phụ thuộc level ban đầu, nhiễu và tick. Tick 2 giây, vật lý x20, timestamp giờ thực UTC. Lowlevel từ 60 xuống ngưỡng 10 mất khoảng 120 giây thực; nạp lại tới 60 bằng inlet 40 mất khoảng 45 giây. Nếu buổi demo đã chạy lệch lịch, chuẩn bị trước trạng thái đầu cho từng phần; không hứa mọi chuỗi thao tác hoàn tất chính xác theo từng phút. Reset không xóa lịch sử. Sau demo đưa về normal; nếu còn ở mức cao với cân bằng 40/40, bật thêm P02 để giảm rồi Stop P02 ở gần 60. Giữ cảnh báo Firing đủ một chu kỳ đánh giá 10 giây trước khi normal để dễ quan sát.
+Thời gian scenario phụ thuộc level ban đầu, nhiễu và tick. Tick 2 giây; mức bể chạy x20, còn áp suất, lưu lượng và độ nghẹt chuyển tiếp theo giây thực; timestamp giờ thực UTC. P02 chờ ít nhất 4 giây thực; nghẹt đạt tối đa sau 60 giây thực. Với chỉ P01 chạy ổn định trước lỗi, HIGH_PRESSURE bật khoảng 58 giây trong kiểm tra offline, chưa tính chu kỳ đánh giá Grafana. Lowlevel từ 60 xuống ngưỡng 10 mất khoảng 120 giây thực; nạp lại tới 60 bằng inlet 40 mất khoảng 45 giây, có ảnh hưởng của dòng chảy dư sau dừng. Nếu buổi demo đã chạy lệch lịch, chuẩn bị trước trạng thái đầu cho từng phần; không hứa mọi chuỗi thao tác hoàn tất chính xác theo từng phút. Reset không xóa lịch sử. Sau demo đưa về normal; nếu còn ở mức cao với cân bằng 40/40, bật thêm P02 để giảm rồi Stop P02 ở gần 60. Giữ cảnh báo Firing đủ một chu kỳ đánh giá 10 giây trước khi normal để dễ quan sát.
 
 ## Quy tắc cần giải thích khi demo
 
@@ -35,7 +35,7 @@ Thời gian scenario phụ thuộc level ban đầu, nhiễu và tick. Tick 2 gi
 | Bồn đạt 90 | Chỉ giảm inlet để chống tràn; không bù inlet lên 50 khi hai bơm hút ra 50 |
 | Vào high_pressure khi cả hai đang chạy | Giữ cả hai chạy; khi nghẹt tối đa outlet khoảng 27,5, áp khoảng 7,755 |
 | High pressure, Stop một bơm | Bơm kia tiếp tục chạy; Run lại bơm đã Stop bị từ chối trong scenario này |
-| LOW_LEVEL / LOW_LOW_LEVEL | Warning vẫn cho Run; critical dừng bơm và khóa Run tới khi phục hồi 60 |
+| LOW_LEVEL / LOW_LOW_LEVEL | Warning vẫn cho Run; critical dừng bơm và khóa Run tới khi phục hồi 60, kể cả giảm đầu vào vẫn bật; manual không tự khởi động lại |
 | Fault bằng tay | Không tự bật standby; Stop hoặc Run có thể xóa Fault của bơm đó |
 | Bấm lại cùng scenario lỗi | Giữ nguyên trạng thái, kể cả manual; normal/reset vẫn có tác dụng |
 
@@ -59,7 +59,7 @@ Trong cửa sổ khác:
 '{"scenario":"low_level"}' | docker compose exec -T mosquitto mosquitto_pub -t plant/ps01/control -q 1 -l
 ```
 
-Các lệnh gửi lần lượt khi đến phần demo tương ứng, không chạy cả khối liên tiếp. Lệnh bơm thủ công (cũng có sáu nút Inject):
+Các lệnh gửi lần lượt khi đến phần demo tương ứng, không chạy cả khối liên tiếp. Nếu muốn minh họa từng lỗi riêng, bấm normal hoặc reset trước mỗi lỗi: ba nút lỗi nay bật cộng dồn, không thay thế nhau. Lệnh bơm thủ công (cũng có sáu nút Inject):
 
 ```powershell
 '{"pump":"P02","command":"run"}' | docker compose exec -T mosquitto mosquitto_pub -t plant/ps01/control -q 1 -l
@@ -68,6 +68,14 @@ Các lệnh gửi lần lượt khi đến phần demo tương ứng, không ch�
 ```
 
 Để minh họa giới hạn Run high_pressure: normal → Run P02 → high_pressure → xác nhận cả hai còn chạy → Stop P01 → Run P01 bị từ chối vì P02 vẫn chạy. Chờ một tick để quan sát từng trạng thái. Chuỗi này là phần mở rộng, không cần chạy chen vào phần high-pressure chuẩn đang dùng chỉ P01.
+
+Demo kết hợp: reset → low_level → high_pressure → pump_fault. P01 lỗi, P02 chạy dự phòng nếu không bị khóa; khi ổn định, inlet 25, outlet 13,75 m³/h, áp khoảng 3,94 bar nên level tăng nhưng không nhất thiết có alarm áp cao. Trong lúc nghẹt tăng, mức bể có thể giảm trước rồi mới tăng. Xem các cờ tác nhân trong Debug applied; scenario MQTT chỉ là tên tóm tắt. Tắt riêng tác nhân qua MQTT:
+
+```powershell
+'{"scenario":"high_pressure","active":false}' | docker compose exec -T mosquitto mosquitto_pub -t plant/ps01/control -q 1 -l
+```
+
+Thử chuyển tiếp: ở LOW_LEVEL bấm normal → high_pressure, P01 tiếp tục chạy và mức hồi theo cân bằng. Nếu đã LOW_LOW_LEVEL, hai bơm vẫn bị chặn tới 60%; sau đó auto cho P01 khỏe chạy qua đường nghẹt. Không bấm normal cũng có thể nhả khóa ở 60%: khi thiếu nước cấp vẫn bật và P01 chạy lại, mức có thể giảm đến lần dừng bảo vệ tiếp theo.
 
 Query lịch sử và trạng thái:
 
