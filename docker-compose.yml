@@ -46,7 +46,7 @@ services:
     environment:
       - TZ=Asia/Ho_Chi_Minh
       - GF_SERVER_ROOT_URL=http://localhost:3001
-      - GF_PLUGINS_PREINSTALL_SYNC=tdengine-datasource@4.0.2@https://github.com/taosdata/grafanaplugin/releases/download/v4.0.2/tdengine-datasource-4.0.2.zip
+      - GF_PLUGINS_PREINSTALL_SYNC=tdengine-datasource@4.0.2@https://github.com/taosdata/grafanaplugin/releases/download/v4.0.2/tdengine-datasource-4.0.2.zip,gapit-htmlgraphics-panel@2.2.3
       - TDENGINE_BASIC_AUTH=${TDENGINE_BASIC_AUTH:-cm9vdDp0YW9zZGF0YQ==}
     volumes:
       - grafana-project-data:/var/lib/grafana

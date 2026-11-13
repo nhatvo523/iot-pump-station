@@ -67,8 +67,14 @@ function Check-GrafanaData([DateTimeOffset]$MinimumTimestamp, [string]$Label) {
     }
     $health = Invoke-Grafana '/api/datasources/uid/tdengine-ps01/health'
     Assert-Check ($health.status -eq 'OK') 'Grafana datasource health failed.'
-    $dashboard = Invoke-Grafana '/api/dashboards/uid/ps01-monitoring'
-    $targets = @($dashboard.dashboard.panels | Where-Object id -eq 1)[0].targets
+    # Read the latest level directly; the duplicate stat panel may be removed from the dashboard.
+    $targets = @(@{
+        refId = 'A'
+        datasource = @{ type = 'tdengine-datasource'; uid = 'tdengine-ps01' }
+        queryType = 'SQL'
+        formatType = 'Time series'
+        sql = 'SELECT ts, val AS Level FROM iot_ps.ps01_lt01 ORDER BY ts DESC LIMIT 1'
+    })
     $now = [DateTimeOffset]::UtcNow
     $response = Invoke-Grafana '/api/ds/query' @{
         from = [string]$now.AddMinutes(-5).ToUnixTimeMilliseconds()

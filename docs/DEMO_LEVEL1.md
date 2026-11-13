@@ -41,7 +41,7 @@ Thời gian scenario phụ thuộc level ban đầu, nhiễu và tick. Tick 2 gi
 
 Normal sau pump_fault/high_pressure có thể hạ level bằng inlet phục hồi đã giảm trước đó. Điều này khác trường hợp inlet/outlet đều 40, khi đó không có chênh lệch để level giảm. Alarm được cập nhật ở tick tiếp theo; Grafana đánh giá mỗi 10 giây và dashboard refresh mỗi 5 giây. Alarm mức nước vẫn còn là đúng nếu chưa qua ngưỡng clear, không coi bấm normal là xóa mọi alarm ngay lập tức.
 
-Dashboard hiện có 12 panel; không còn panel Scenario/Simulator active alarms. Xem scenario trong MQTT hoặc query station_state. PS01 - Active alerts chỉ hiển thị trạng thái đang có vấn đề; bảng Alarm transitions giữ cả sự kiện bật và clear.
+Dashboard `PS01 - Pump Station` tại `http://localhost:3001/d/ps01-monitoring` gộp SCADA và Monitoring thành 7 panel. Hàng đầu gồm sơ đồ trạm bên trái và danh sách cảnh báo bên phải; tiếp theo là ba biểu đồ, timeline bơm và bảng sự kiện. Các thẻ số đo/trạng thái riêng đã bỏ vì trùng với SCADA. SCADA luôn hiển thị trạng thái mới nhất; biểu đồ và bảng sự kiện dùng khoảng thời gian đang chọn. Xem scenario trong MQTT hoặc query station_state. PS01 - Active alerts chỉ hiển thị trạng thái đang có vấn đề; bảng Alarm transitions giữ cả sự kiện bật và clear. UID dashboard được giữ nguyên; sáu rule cảnh báo liên kết tới biểu đồ mức nước, áp suất và timeline bơm.
 
 ## Lệnh hỗ trợ
 

@@ -99,7 +99,7 @@
             "summary": "PS01 - LOW_LEVEL",
             "description": "Level <=20%; clears >25%",
             "__dashboardUid__": "ps01-monitoring",
-            "__panelId__": "1"
+            "__panelId__": "6"
           },
           "labels": {
             "station": "PS01",
@@ -200,7 +200,7 @@
             "summary": "PS01 - LOW_LOW_LEVEL",
             "description": "Level <=10%; clears >30%",
             "__dashboardUid__": "ps01-monitoring",
-            "__panelId__": "1"
+            "__panelId__": "6"
           },
           "labels": {
             "station": "PS01",
@@ -301,7 +301,7 @@
             "summary": "PS01 - HIGH_LEVEL",
             "description": "Level >=85%; clears <=80%",
             "__dashboardUid__": "ps01-monitoring",
-            "__panelId__": "1"
+            "__panelId__": "6"
           },
           "labels": {
             "station": "PS01",
@@ -402,7 +402,7 @@
             "summary": "PS01 - HIGH_HIGH_LEVEL",
             "description": "Level >=90%; clears <=85%",
             "__dashboardUid__": "ps01-monitoring",
-            "__panelId__": "1"
+            "__panelId__": "6"
           },
           "labels": {
             "station": "PS01",
@@ -503,7 +503,7 @@
             "summary": "PS01 - HIGH_PRESSURE",
             "description": "Pressure >6 bar; clears <5.5 bar",
             "__dashboardUid__": "ps01-monitoring",
-            "__panelId__": "2"
+            "__panelId__": "7"
           },
           "labels": {
             "station": "PS01",
